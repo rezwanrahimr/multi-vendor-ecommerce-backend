@@ -1,0 +1,280 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  VENDOR
+  CUSTOMER
+  DELIVERY_MAN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum AuthProvider {
+  LOCAL
+  GOOGLE
+  FACEBOOK
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  OUT_OF_STOCK
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum ReviewStatus {
+  PENDING
+  PUBLISHED
+  HIDDEN
+}
+
+enum WalletTransactionType {
+  CREDIT
+  DEBIT
+  WITHDRAWAL
+}
+
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+}
+
+model User {
+  id              String       @id @default(uuid())
+  name            String
+  email           String       @unique
+  phone           String?      @unique
+  passwordHash    String?
+  avatarUrl       String?
+  role            UserRole     @default(CUSTOMER)
+  status          UserStatus   @default(ACTIVE)
+  authProvider    AuthProvider @default(LOCAL)
+  providerId      String?
+
+  products        Product[]    @relation("VendorProducts")
+  customerOrders  Order[]      @relation("CustomerOrders")
+  deliveryOrders  Order[]      @relation("DeliveryOrders")
+  reviews         Review[]
+  wallet          Wallet?
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([role])
+  @@index([status])
+  @@unique([authProvider, providerId])
+}
+
+model Category {
+  id          String     @id @default(uuid())
+  name        String
+  slug        String     @unique
+  description String?
+  parentId    String?
+
+  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Category[] @relation("CategoryTree")
+  products    Product[]
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([parentId])
+}
+
+model Product {
+  id             String        @id @default(uuid())
+  vendorId       String
+  categoryId     String?
+
+  name           String
+  slug           String        @unique
+  description    String?
+  price          Decimal       @db.Decimal(10, 2)
+  discountPrice  Decimal?      @db.Decimal(10, 2)
+  stock          Int           @default(0)
+  sku            String?       @unique
+  images         String[]      @default([])
+  status         ProductStatus @default(DRAFT)
+  avgRating      Decimal       @default(0) @db.Decimal(3, 2)
+  reviewsCount   Int           @default(0)
+
+  vendor         User          @relation("VendorProducts", fields: [vendorId], references: [id], onDelete: Cascade)
+  category       Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  orderItems     OrderItem[]
+  reviews        Review[]
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([vendorId])
+  @@index([categoryId])
+  @@index([status])
+  @@index([slug])
+}
+
+model Order {
+  id              String        @id @default(uuid())
+  orderNumber     String        @unique
+  customerId      String
+  deliveryManId   String?
+
+  status          OrderStatus   @default(PENDING)
+  paymentStatus   PaymentStatus @default(PENDING)
+  subtotal        Decimal       @db.Decimal(10, 2)
+  deliveryFee     Decimal       @default(0) @db.Decimal(10, 2)
+  discountAmount  Decimal       @default(0) @db.Decimal(10, 2)
+  total           Decimal       @db.Decimal(10, 2)
+  shippingAddress Json
+  customerNote    String?
+
+  customer        User          @relation("CustomerOrders", fields: [customerId], references: [id], onDelete: Restrict)
+  deliveryMan     User?         @relation("DeliveryOrders", fields: [deliveryManId], references: [id], onDelete: SetNull)
+  items           OrderItem[]
+  payment         Payment?
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([customerId])
+  @@index([deliveryManId])
+  @@index([status])
+  @@index([paymentStatus])
+}
+
+model OrderItem {
+  id         String   @id @default(uuid())
+  orderId    String
+  productId  String
+  vendorId   String
+  quantity   Int
+  unitPrice  Decimal  @db.Decimal(10, 2)
+  totalPrice Decimal  @db.Decimal(10, 2)
+
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([productId])
+  @@index([vendorId])
+}
+
+model Review {
+  id         String       @id @default(uuid())
+  productId  String
+  customerId String
+  rating     Int
+  comment    String?
+  status     ReviewStatus @default(PUBLISHED)
+
+  product    Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customer   User         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@unique([productId, customerId])
+  @@index([productId])
+  @@index([customerId])
+  @@index([status])
+}
+
+model Payment {
+  id            String        @id @default(uuid())
+  orderId       String        @unique
+  method        String
+  provider      String?
+  transactionId String?       @unique
+  amount        Decimal       @db.Decimal(10, 2)
+  status        PaymentStatus @default(PENDING)
+  metadata      Json?
+
+  order         Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([status])
+}
+
+model Wallet {
+  id             String              @id @default(uuid())
+  vendorId       String              @unique
+  balance        Decimal             @default(0) @db.Decimal(10, 2)
+  pendingBalance Decimal             @default(0) @db.Decimal(10, 2)
+
+  vendor         User                @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  transactions   WalletTransaction[]
+  withdrawals    WithdrawalRequest[]
+
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+}
+
+model WalletTransaction {
+  id        String                @id @default(uuid())
+  walletId  String
+  type      WalletTransactionType
+  amount    Decimal               @db.Decimal(10, 2)
+  reference String?
+  reason    String?
+  metadata  Json?
+
+  wallet    Wallet                @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime              @default(now())
+
+  @@index([walletId])
+  @@index([type])
+}
+
+model WithdrawalRequest {
+  id            String           @id @default(uuid())
+  walletId      String
+  amount        Decimal          @db.Decimal(10, 2)
+  status        WithdrawalStatus @default(PENDING)
+  paymentMethod String
+  accountNumber String
+  note          String?
+
+  wallet        Wallet           @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([walletId])
+  @@index([status])
+}
