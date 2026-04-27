@@ -2,7 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../database/prisma.service';
-import { buildPaginationMeta, getPagination } from '../../utils/pagination.util';
+import {
+  buildPaginationMeta,
+  getPagination,
+} from '../../utils/pagination.util';
+import { createSlug } from '../../utils/slug.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
@@ -11,7 +15,9 @@ export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreateUserDto) {
-    const passwordHash = dto.password ? await bcrypt.hash(dto.password, 12) : undefined;
+    const passwordHash = dto.password
+      ? await bcrypt.hash(dto.password, 12)
+      : undefined;
 
     return this.prisma.user.create({
       data: {
@@ -22,6 +28,15 @@ export class UsersService {
         role: dto.role,
         status: dto.status,
         wallet: dto.role === UserRole.VENDOR ? { create: {} } : undefined,
+        store:
+          dto.role === UserRole.VENDOR
+            ? {
+                create: {
+                  name: dto.storeName ?? `${dto.name}'s Store`,
+                  slug: createSlug(`${dto.storeName ?? dto.name}-${dto.email}`),
+                },
+              }
+            : undefined,
       },
       select: this.defaultSelect(),
     });
@@ -76,6 +91,7 @@ export class UsersService {
       avatarUrl: true,
       role: true,
       status: true,
+      store: true,
       createdAt: true,
       updatedAt: true,
     } as const;

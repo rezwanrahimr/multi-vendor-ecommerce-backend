@@ -15,6 +15,10 @@ export class ProductQueryDto {
   vendorId?: string;
 
   @IsOptional()
+  @IsString()
+  storeId?: string;
+
+  @IsOptional()
   @IsEnum(ProductStatus)
   status?: ProductStatus;
 

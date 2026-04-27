@@ -29,6 +29,10 @@ export class CreateOrderDto {
   shippingAddress: Record<string, unknown>;
 
   @IsOptional()
+  @IsString()
+  deliveryAreaId?: string;
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
   deliveryFee?: number;

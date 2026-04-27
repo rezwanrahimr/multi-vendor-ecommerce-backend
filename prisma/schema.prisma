@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum UserRole {
@@ -33,7 +34,29 @@ enum ProductStatus {
   OUT_OF_STOCK
 }
 
+enum StoreStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum StoreVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
 enum CategoryStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum StockLogType {
+  INCREASE
+  DECREASE
+}
+
+enum DeliveryAreaStatus {
   ACTIVE
   INACTIVE
 }
@@ -75,56 +98,88 @@ enum WithdrawalStatus {
 }
 
 model User {
-  id              String       @id @default(uuid())
-  name            String
-  email           String       @unique
-  phone           String?      @unique
-  passwordHash    String?
-  avatarUrl       String?
-  role            UserRole     @default(CUSTOMER)
-  status          UserStatus   @default(ACTIVE)
-  authProvider    AuthProvider @default(LOCAL)
-  providerId      String?
+  id           String       @id @default(uuid())
+  name         String
+  email        String       @unique
+  phone        String?      @unique
+  passwordHash String?
+  avatarUrl    String?
+  role         UserRole     @default(CUSTOMER)
+  status       UserStatus   @default(ACTIVE)
+  authProvider AuthProvider @default(LOCAL)
+  providerId   String?
 
-  products        Product[]    @relation("VendorProducts")
-  customerOrders  Order[]      @relation("CustomerOrders")
-  deliveryOrders  Order[]      @relation("DeliveryOrders")
-  reviews         Review[]
-  wallet          Wallet?
+  products       Product[]  @relation("VendorProducts")
+  store          Store?
+  customerOrders Order[]    @relation("CustomerOrders")
+  deliveryOrders Order[]    @relation("DeliveryOrders")
+  stockLogs      StockLog[] @relation("StockLogChangedBy")
+  reviews        Review[]
+  wallet         Wallet?
 
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
+  @@unique([authProvider, providerId])
   @@index([role])
   @@index([status])
-  @@unique([authProvider, providerId])
+}
+
+model Store {
+  id                 String                  @id @default(uuid())
+  vendorId           String                  @unique
+  name               String
+  slug               String                  @unique
+  description        String?
+  logoUrl            String?
+  logoPublicId       String?
+  bannerUrl          String?
+  bannerPublicId     String?
+  phone              String?
+  address            Json?
+  status             StoreStatus             @default(ACTIVE)
+  verificationStatus StoreVerificationStatus @default(PENDING)
+  commissionRate     Decimal                 @default(10) @db.Decimal(5, 2)
+
+  vendor     User        @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  products   Product[]
+  orderItems OrderItem[]
+  stockLogs  StockLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([vendorId])
+  @@index([status])
+  @@index([verificationStatus])
 }
 
 model Category {
-  id          String     @id @default(uuid())
-  name        String
-  slug        String     @unique
-  description String?
-  parentId    String?
-  status      CategoryStatus @default(ACTIVE)
-  imageUrl    String?
+  id            String         @id @default(uuid())
+  name          String
+  slug          String         @unique
+  description   String?
+  parentId      String?
+  status        CategoryStatus @default(ACTIVE)
+  imageUrl      String?
   imagePublicId String?
 
-  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
-  children    Category[] @relation("CategoryTree")
-  products    Product[]
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[] @relation("CategoryTree")
+  products Product[]
 
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([parentId])
   @@index([status])
 }
 
 model Product {
-  id             String        @id @default(uuid())
-  vendorId       String
-  categoryId     String?
+  id         String  @id @default(uuid())
+  vendorId   String
+  storeId    String
+  categoryId String?
 
   name           String
   slug           String        @unique
@@ -134,29 +189,78 @@ model Product {
   stock          Int           @default(0)
   sku            String?       @unique
   images         String[]      @default([])
+  imagePublicIds String[]      @default([])
   status         ProductStatus @default(DRAFT)
   avgRating      Decimal       @default(0) @db.Decimal(3, 2)
   reviewsCount   Int           @default(0)
 
-  vendor         User          @relation("VendorProducts", fields: [vendorId], references: [id], onDelete: Cascade)
-  category       Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  orderItems     OrderItem[]
-  reviews        Review[]
+  vendor     User        @relation("VendorProducts", fields: [vendorId], references: [id], onDelete: Cascade)
+  store      Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  category   Category?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  orderItems OrderItem[]
+  stockLogs  StockLog[]
+  reviews    Review[]
 
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([vendorId])
+  @@index([storeId])
   @@index([categoryId])
   @@index([status])
   @@index([slug])
 }
 
+model StockLog {
+  id            String       @id @default(uuid())
+  productId     String
+  storeId       String
+  changedById   String?
+  type          StockLogType
+  quantity      Int
+  previousStock Int
+  newStock      Int
+  reason        String?
+  reference     String?
+
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  store     Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  changedBy User?   @relation("StockLogChangedBy", fields: [changedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+  @@index([storeId])
+  @@index([changedById])
+  @@index([type])
+  @@index([reference])
+}
+
+model DeliveryArea {
+  id                    String             @id @default(uuid())
+  name                  String
+  slug                  String             @unique
+  district              String             @default("Feni")
+  city                  String             @default("Feni")
+  fee                   Decimal            @db.Decimal(10, 2)
+  estimatedDeliveryTime String?
+  status                DeliveryAreaStatus @default(ACTIVE)
+
+  orders Order[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([district, city])
+}
+
 model Order {
-  id              String        @id @default(uuid())
-  orderNumber     String        @unique
-  customerId      String
-  deliveryManId   String?
+  id             String  @id @default(uuid())
+  orderNumber    String  @unique
+  customerId     String
+  deliveryManId  String?
+  deliveryAreaId String?
 
   status          OrderStatus   @default(PENDING)
   paymentStatus   PaymentStatus @default(PENDING)
@@ -166,39 +270,48 @@ model Order {
   total           Decimal       @db.Decimal(10, 2)
   shippingAddress Json
   customerNote    String?
+  vendorSettledAt DateTime?
 
-  customer        User          @relation("CustomerOrders", fields: [customerId], references: [id], onDelete: Restrict)
-  deliveryMan     User?         @relation("DeliveryOrders", fields: [deliveryManId], references: [id], onDelete: SetNull)
-  items           OrderItem[]
-  payment         Payment?
+  customer     User          @relation("CustomerOrders", fields: [customerId], references: [id], onDelete: Restrict)
+  deliveryMan  User?         @relation("DeliveryOrders", fields: [deliveryManId], references: [id], onDelete: SetNull)
+  deliveryArea DeliveryArea? @relation(fields: [deliveryAreaId], references: [id], onDelete: SetNull)
+  items        OrderItem[]
+  payment      Payment?
 
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([customerId])
   @@index([deliveryManId])
+  @@index([deliveryAreaId])
   @@index([status])
   @@index([paymentStatus])
+  @@index([vendorSettledAt])
 }
 
 model OrderItem {
-  id         String   @id @default(uuid())
-  orderId    String
-  productId  String
-  vendorId   String
-  quantity   Int
-  unitPrice  Decimal  @db.Decimal(10, 2)
-  totalPrice Decimal  @db.Decimal(10, 2)
+  id              String  @id @default(uuid())
+  orderId         String
+  productId       String
+  vendorId        String
+  storeId         String
+  quantity        Int
+  unitPrice       Decimal @db.Decimal(10, 2)
+  totalPrice      Decimal @db.Decimal(10, 2)
+  adminCommission Decimal @default(0) @db.Decimal(10, 2)
+  vendorEarning   Decimal @default(0) @db.Decimal(10, 2)
 
-  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product    Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  store   Store   @relation(fields: [storeId], references: [id], onDelete: Restrict)
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([orderId])
   @@index([productId])
   @@index([vendorId])
+  @@index([storeId])
 }
 
 model Review {
@@ -209,11 +322,11 @@ model Review {
   comment    String?
   status     ReviewStatus @default(PUBLISHED)
 
-  product    Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
-  customer   User         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product  Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customer User    @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
-  createdAt  DateTime     @default(now())
-  updatedAt  DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([productId, customerId])
   @@index([productId])
@@ -231,26 +344,26 @@ model Payment {
   status        PaymentStatus @default(PENDING)
   metadata      Json?
 
-  order         Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([status])
 }
 
 model Wallet {
-  id             String              @id @default(uuid())
-  vendorId       String              @unique
-  balance        Decimal             @default(0) @db.Decimal(10, 2)
-  pendingBalance Decimal             @default(0) @db.Decimal(10, 2)
+  id             String  @id @default(uuid())
+  vendorId       String  @unique
+  balance        Decimal @default(0) @db.Decimal(10, 2)
+  pendingBalance Decimal @default(0) @db.Decimal(10, 2)
 
-  vendor         User                @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  transactions   WalletTransaction[]
-  withdrawals    WithdrawalRequest[]
+  vendor       User                @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+  withdrawals  WithdrawalRequest[]
 
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model WalletTransaction {
@@ -262,10 +375,11 @@ model WalletTransaction {
   reason    String?
   metadata  Json?
 
-  wallet    Wallet                @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
-  createdAt DateTime              @default(now())
+  createdAt DateTime @default(now())
 
+  @@unique([walletId, type, reference])
   @@index([walletId])
   @@index([type])
 }
@@ -279,10 +393,10 @@ model WithdrawalRequest {
   accountNumber String
   note          String?
 
-  wallet        Wallet           @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([walletId])
   @@index([status])

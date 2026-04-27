@@ -1,9 +1,14 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AuthProvider, User, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../database/prisma.service';
+import { createSlug } from '../../utils/slug.util';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { SocialLoginDto } from './dto/social-login.dto';
@@ -26,7 +31,8 @@ export class AuthService {
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
-    const role = dto.role === UserRole.VENDOR ? UserRole.VENDOR : UserRole.CUSTOMER;
+    const role =
+      dto.role === UserRole.VENDOR ? UserRole.VENDOR : UserRole.CUSTOMER;
 
     const user = await this.prisma.user.create({
       data: {
@@ -36,6 +42,15 @@ export class AuthService {
         passwordHash,
         role,
         wallet: role === UserRole.VENDOR ? { create: {} } : undefined,
+        store:
+          role === UserRole.VENDOR
+            ? {
+                create: {
+                  name: dto.storeName ?? `${dto.name}'s Store`,
+                  slug: createSlug(`${dto.storeName ?? dto.name}-${dto.email}`),
+                },
+              }
+            : undefined,
       },
     });
 
@@ -51,7 +66,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const isPasswordValid = await bcrypt.compare(dto.password, user.passwordHash);
+    const isPasswordValid = await bcrypt.compare(
+      dto.password,
+      user.passwordHash,
+    );
 
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid email or password');
@@ -61,7 +79,8 @@ export class AuthService {
   }
 
   async socialLogin(dto: SocialLoginDto) {
-    const role = dto.role === UserRole.VENDOR ? UserRole.VENDOR : UserRole.CUSTOMER;
+    const role =
+      dto.role === UserRole.VENDOR ? UserRole.VENDOR : UserRole.CUSTOMER;
     const user = await this.prisma.user.upsert({
       where: {
         authProvider_providerId: {
@@ -81,6 +100,15 @@ export class AuthService {
         providerId: dto.providerId,
         role,
         wallet: role === UserRole.VENDOR ? { create: {} } : undefined,
+        store:
+          role === UserRole.VENDOR
+            ? {
+                create: {
+                  name: `${dto.name}'s Store`,
+                  slug: createSlug(`${dto.name}-${dto.email}`),
+                },
+              }
+            : undefined,
       },
     });
 
@@ -98,6 +126,7 @@ export class AuthService {
         avatarUrl: true,
         role: true,
         status: true,
+        store: true,
         createdAt: true,
         updatedAt: true,
       },

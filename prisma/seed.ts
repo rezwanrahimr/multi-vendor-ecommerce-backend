@@ -1,4 +1,10 @@
-import { PrismaClient, ProductStatus, UserRole } from '@prisma/client';
+import {
+  DeliveryAreaStatus,
+  PrismaClient,
+  ProductStatus,
+  StoreVerificationStatus,
+  UserRole,
+} from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
@@ -41,9 +47,24 @@ async function main() {
     },
   });
 
+  const store = await prisma.store.upsert({
+    where: { vendorId: vendor.id },
+    update: {},
+    create: {
+      vendorId: vendor.id,
+      name: 'Demo Vendor Store',
+      slug: 'demo-vendor-store',
+      verificationStatus: StoreVerificationStatus.VERIFIED,
+      commissionRate: 10,
+    },
+  });
+
   await prisma.product.upsert({
     where: { slug: 'premium-rice-5kg' },
-    update: {},
+    update: {
+      vendorId: vendor.id,
+      storeId: store.id,
+    },
     create: {
       name: 'Premium Rice 5kg',
       slug: 'premium-rice-5kg',
@@ -52,10 +73,34 @@ async function main() {
       stock: 50,
       status: ProductStatus.ACTIVE,
       vendorId: vendor.id,
+      storeId: store.id,
       categoryId: category.id,
       images: [],
     },
   });
+
+  await Promise.all(
+    [
+      { name: 'Feni Sadar', slug: 'feni-sadar', fee: 60 },
+      { name: 'Chhagalnaiya', slug: 'chhagalnaiya', fee: 90 },
+      { name: 'Daganbhuiyan', slug: 'daganbhuiyan', fee: 90 },
+      { name: 'Parshuram', slug: 'parshuram', fee: 100 },
+      { name: 'Fulgazi', slug: 'fulgazi', fee: 100 },
+      { name: 'Sonagazi', slug: 'sonagazi', fee: 110 },
+    ].map((area) =>
+      prisma.deliveryArea.upsert({
+        where: { slug: area.slug },
+        update: {
+          fee: area.fee,
+          status: DeliveryAreaStatus.ACTIVE,
+        },
+        create: {
+          ...area,
+          estimatedDeliveryTime: '1-2 days',
+        },
+      }),
+    ),
+  );
 
   console.log(`Seeded admin ${admin.email} and vendor ${vendor.email}`);
 }
