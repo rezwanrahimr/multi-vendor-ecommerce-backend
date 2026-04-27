@@ -1,22 +1,46 @@
 import { Injectable } from '@nestjs/common';
+import { CloudinaryService } from '../../common/services/cloudinary.service';
 import { PrismaService } from '../../database/prisma.service';
 import { createSlug } from '../../utils/slug.util';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 
+type UploadFile = {
+  buffer: Buffer;
+  mimetype?: string;
+};
+
 @Injectable()
 export class CategoriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) {}
 
-  create(dto: CreateCategoryDto) {
-    return this.prisma.category.create({
-      data: {
-        name: dto.name,
-        slug: dto.slug ?? createSlug(dto.name),
-        description: dto.description,
-        parentId: dto.parentId,
-      },
-    });
+  async create(dto: CreateCategoryDto, image?: UploadFile) {
+    const uploadedImage = image
+      ? await this.cloudinaryService.uploadImage(image, 'categories')
+      : undefined;
+
+    try {
+      return await this.prisma.category.create({
+        data: {
+          name: dto.name,
+          slug: dto.slug ?? createSlug(dto.name),
+          description: dto.description,
+          parentId: dto.parentId,
+          status: dto.status,
+          imageUrl: uploadedImage?.secureUrl,
+          imagePublicId: uploadedImage?.publicId,
+        },
+      });
+    } catch (error) {
+      if (uploadedImage?.publicId) {
+        await this.cloudinaryService.deleteImage(uploadedImage.publicId);
+      }
+
+      throw error;
+    }
   }
 
   findAll() {
@@ -41,19 +65,52 @@ export class CategoriesService {
     });
   }
 
-  update(id: string, dto: UpdateCategoryDto) {
-    return this.prisma.category.update({
-      where: { id },
-      data: {
-        ...dto,
-        slug: dto.slug ?? (dto.name ? createSlug(dto.name) : undefined),
-      },
-    });
+  async update(id: string, dto: UpdateCategoryDto, image?: UploadFile) {
+    const currentCategory = image
+      ? await this.prisma.category.findUniqueOrThrow({
+          where: { id },
+          select: { imagePublicId: true },
+        })
+      : null;
+
+    const uploadedImage = image
+      ? await this.cloudinaryService.uploadImage(image, 'categories')
+      : undefined;
+
+    try {
+      const updatedCategory = await this.prisma.category.update({
+        where: { id },
+        data: {
+          ...dto,
+          slug: dto.slug ?? (dto.name ? createSlug(dto.name) : undefined),
+          imageUrl: uploadedImage ? uploadedImage.secureUrl : undefined,
+          imagePublicId: uploadedImage ? uploadedImage.publicId : undefined,
+        },
+      });
+
+      if (uploadedImage && currentCategory?.imagePublicId) {
+        await this.cloudinaryService.deleteImage(currentCategory.imagePublicId);
+      }
+
+      return updatedCategory;
+    } catch (error) {
+      if (uploadedImage?.publicId) {
+        await this.cloudinaryService.deleteImage(uploadedImage.publicId);
+      }
+
+      throw error;
+    }
   }
 
-  remove(id: string) {
-    return this.prisma.category.delete({
+  async remove(id: string) {
+    const deletedCategory = await this.prisma.category.delete({
       where: { id },
     });
+
+    if (deletedCategory.imagePublicId) {
+      await this.cloudinaryService.deleteImage(deletedCategory.imagePublicId);
+    }
+
+    return deletedCategory;
   }
 }

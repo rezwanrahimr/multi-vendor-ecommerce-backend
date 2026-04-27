@@ -33,6 +33,11 @@ enum ProductStatus {
   OUT_OF_STOCK
 }
 
+enum CategoryStatus {
+  ACTIVE
+  INACTIVE
+}
+
 enum OrderStatus {
   PENDING
   CONFIRMED
@@ -101,6 +106,9 @@ model Category {
   slug        String     @unique
   description String?
   parentId    String?
+  status      CategoryStatus @default(ACTIVE)
+  imageUrl    String?
+  imagePublicId String?
 
   parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
   children    Category[] @relation("CategoryTree")
@@ -110,6 +118,7 @@ model Category {
   updatedAt   DateTime   @updatedAt
 
   @@index([parentId])
+  @@index([status])
 }
 
 model Product {
