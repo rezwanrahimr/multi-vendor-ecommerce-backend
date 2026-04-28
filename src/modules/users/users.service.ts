@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../database/prisma.service';
 import {
@@ -9,6 +9,7 @@ import {
 import { createSlug } from '../../utils/slug.util';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UserQueryDto } from './dto/user-query.dto';
 
 @Injectable()
 export class UsersService {
@@ -42,16 +43,34 @@ export class UsersService {
     });
   }
 
-  async findAll(page?: number, limit?: number) {
-    const pagination = getPagination({ page, limit });
+  async findAll(query: UserQueryDto) {
+    const pagination = getPagination({ page: query.page, limit: query.limit });
+    const where: Prisma.UserWhereInput = {
+      role: query.role,
+      status: query.status,
+      OR: query.search
+        ? [
+            { name: { contains: query.search, mode: 'insensitive' } },
+            { email: { contains: query.search, mode: 'insensitive' } },
+            { phone: { contains: query.search, mode: 'insensitive' } },
+            {
+              store: {
+                name: { contains: query.search, mode: 'insensitive' },
+              },
+            },
+          ]
+        : undefined,
+    };
+
     const [data, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
+        where,
         skip: pagination.skip,
         take: pagination.take,
         orderBy: { createdAt: 'desc' },
         select: this.defaultSelect(),
       }),
-      this.prisma.user.count(),
+      this.prisma.user.count({ where }),
     ]);
 
     return {
@@ -91,7 +110,13 @@ export class UsersService {
       avatarUrl: true,
       role: true,
       status: true,
-      store: true,
+      store: {
+        include: {
+          _count: {
+            select: { products: true },
+          },
+        },
+      },
       createdAt: true,
       updatedAt: true,
     } as const;
