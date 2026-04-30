@@ -10,6 +10,7 @@ import { DatabaseModule } from './database/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { DeliveryModule } from './modules/delivery/delivery.module';
+import { HomeBannersModule } from './modules/home-banners/home-banners.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ProductsModule } from './modules/products/products.module';
@@ -37,6 +38,7 @@ import { AppService } from './app.service';
     PaymentsModule,
     WalletsModule,
     DeliveryModule,
+    HomeBannersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

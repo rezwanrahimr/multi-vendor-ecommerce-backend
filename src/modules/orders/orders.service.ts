@@ -21,6 +21,8 @@ import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 
 @Injectable()
 export class OrdersService {
+  private static readonly ORDER_TRANSACTION_TIMEOUT_MS = 15000;
+
   constructor(private readonly prisma: PrismaService) {}
 
   async create(customerId: string, dto: CreateOrderDto) {
@@ -28,7 +30,7 @@ export class OrdersService {
       throw new BadRequestException('Order must include at least one product');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const orderId = await this.prisma.$transaction(async (tx) => {
       const products = await tx.product.findMany({
         where: {
           id: { in: dto.items.map((item) => item.productId) },
@@ -106,15 +108,14 @@ export class OrdersService {
         },
       });
 
-      for (const item of orderItems) {
-        await this.decrementProductStock(tx, item, order.id, customerId);
-      }
+      await this.decrementProductStock(tx, orderItems, order.id, customerId);
 
-      return tx.order.findUniqueOrThrow({
-        where: { id: order.id },
-        include: this.defaultInclude(),
-      });
+      return order.id;
+    }, {
+      timeout: OrdersService.ORDER_TRANSACTION_TIMEOUT_MS,
     });
+
+    return this.findOne(orderId);
   }
 
   async findAll(page?: number, limit?: number) {
@@ -266,49 +267,67 @@ export class OrdersService {
 
   private async decrementProductStock(
     tx: Prisma.TransactionClient,
-    item: {
+    items: {
       productId: string;
       storeId: string;
       quantity: number;
-    },
+    }[],
     orderId: string,
     customerId: string,
   ) {
-    const result = await tx.product.updateMany({
-      where: {
-        id: item.productId,
-        stock: {
-          gte: item.quantity,
+    for (const item of items) {
+      const result = await tx.product.updateMany({
+        where: {
+          id: item.productId,
+          stock: {
+            gte: item.quantity,
+          },
         },
-      },
-      data: {
-        stock: {
-          decrement: item.quantity,
+        data: {
+          stock: {
+            decrement: item.quantity,
+          },
         },
-      },
-    });
+      });
 
-    if (result.count === 0) {
-      throw new BadRequestException('Product stock is not sufficient');
+      if (result.count === 0) {
+        throw new BadRequestException('Product stock is not sufficient');
+      }
     }
 
-    const product = await tx.product.findUniqueOrThrow({
-      where: { id: item.productId },
-      select: { stock: true },
-    });
-
-    await tx.stockLog.create({
-      data: {
-        productId: item.productId,
-        storeId: item.storeId,
-        changedById: customerId,
-        type: StockLogType.DECREASE,
-        quantity: item.quantity,
-        previousStock: product.stock + item.quantity,
-        newStock: product.stock,
-        reason: 'ORDER_PLACED',
-        reference: orderId,
+    const updatedProducts = await tx.product.findMany({
+      where: {
+        id: { in: items.map((item) => item.productId) },
       },
+      select: {
+        id: true,
+        stock: true,
+      },
+    });
+    const stockByProductId = new Map(
+      updatedProducts.map((product) => [product.id, product.stock]),
+    );
+
+    await tx.stockLog.createMany({
+      data: items.map((item) => {
+        const newStock = stockByProductId.get(item.productId);
+
+        if (newStock === undefined) {
+          throw new BadRequestException('One or more products are unavailable');
+        }
+
+        return {
+          productId: item.productId,
+          storeId: item.storeId,
+          changedById: customerId,
+          type: StockLogType.DECREASE,
+          quantity: item.quantity,
+          previousStock: newStock + item.quantity,
+          newStock,
+          reason: 'ORDER_PLACED',
+          reference: orderId,
+        };
+      }),
     });
   }
 

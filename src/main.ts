@@ -11,12 +11,14 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
   const port = configService.get<number>('app.port', 5000);
-  const corsOrigin = configService.get<string>('app.corsOrigin', '*');
+  const corsOrigin = configService.get<string>('app.corsOrigin', 'http://localhost:3001');
   const apiPrefix = 'api/v1';
 
   app.enableCors({
-    origin: corsOrigin === '*' ? true : corsOrigin.split(','),
+    origin: corsOrigin.split(',').map(origin => origin.trim()),
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
   app.setGlobalPrefix(apiPrefix, {

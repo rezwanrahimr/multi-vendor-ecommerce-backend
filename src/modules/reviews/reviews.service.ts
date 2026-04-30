@@ -21,7 +21,7 @@ export class ReviewsService {
 
   findByProduct(productId: string) {
     return this.prisma.review.findMany({
-      where: { productId },
+      where: { productId, status: 'PUBLISHED' },
       orderBy: { createdAt: 'desc' },
       include: this.defaultInclude(),
     });
