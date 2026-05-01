@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -9,6 +10,7 @@ import { WalletsService } from './wallets.service';
 import { WithdrawRequestDto } from './dto/withdraw-request.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiTags('Wallets')
 @Controller('wallets')
 export class WalletsController {
   constructor(private readonly walletsService: WalletsService) {}

@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -10,6 +11,7 @@ import { UpdateDeliveryStatusDto } from './dto/update-delivery-status.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.DELIVERY_MAN)
+@ApiTags('Delivery')
 @Controller('delivery')
 export class DeliveryController {
   constructor(private readonly deliveryService: DeliveryService) {}

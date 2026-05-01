@@ -3,7 +3,7 @@ import { ApiExcludeEndpoint, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SkipResponseTransform } from './common/decorators/skip-response-transform.decorator';
 import { AppService } from './app.service';
 
-@ApiTags('app')
+@ApiTags('System')
 @Controller()
 export class AppController {
   constructor(private readonly appService: AppService) {}

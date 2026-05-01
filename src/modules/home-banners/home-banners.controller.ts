@@ -12,7 +12,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBody, ApiConsumes } from '@nestjs/swagger';
+import { ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -23,6 +23,7 @@ import { HomeBannersService } from './home-banners.service';
 
 const BANNER_IMAGE_MAX_SIZE = 8 * 1024 * 1024;
 
+@ApiTags('Home Banners')
 @Controller('home-banners')
 export class HomeBannersController {
   constructor(private readonly homeBannersService: HomeBannersService) {}
