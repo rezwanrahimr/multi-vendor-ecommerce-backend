@@ -61,6 +61,18 @@ Base path: `/api/v1`
 - `DELETE /cart/items/:id`
 - `DELETE /cart/clear`
 - `POST /checkout/calculate`
+- `POST /checkout/validate-coupon`
+
+## Coupons
+
+- `GET /coupons/active`
+- `POST /admin/coupons`
+- `GET /admin/coupons`
+- `GET /admin/coupons/:id`
+- `PATCH /admin/coupons/:id`
+- `PATCH /admin/coupons/:id/activate`
+- `PATCH /admin/coupons/:id/deactivate`
+- `DELETE /admin/coupons/:id`
 
 ## Orders
 
@@ -109,6 +121,33 @@ Base path: `/api/v1`
 - `PATCH /admin/payments/:id/reject-cod`
 - `GET /payments/:id`
 - `POST /payments/webhook`
+
+## Reviews
+
+- `POST /products/:productId/reviews`
+- `GET /products/:productId/reviews`
+- `GET /products/:productId/rating-summary`
+- `GET /customer/reviews`
+- `PATCH /customer/reviews/:id`
+- `DELETE /customer/reviews/:id`
+- `GET /vendor/reviews`
+- `GET /admin/reviews`
+- `PATCH /admin/reviews/:id/approve`
+- `PATCH /admin/reviews/:id/hide`
+- `DELETE /admin/reviews/:id`
+
+## Notifications
+
+- `GET /notifications`
+- `GET /notifications/unread-count`
+- `PATCH /notifications/:id/read`
+- `PATCH /notifications/read-all`
+- `DELETE /notifications/:id`
+
+## Audit Logs
+
+- `GET /admin/audit-logs`
+- `GET /admin/audit-logs/:id`
 
 ## Wallets and Payouts
 

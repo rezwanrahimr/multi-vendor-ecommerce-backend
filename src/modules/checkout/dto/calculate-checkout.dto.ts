@@ -5,6 +5,7 @@ import {
   IsEnum,
   IsInt,
   IsOptional,
+  IsString,
   IsUUID,
   Min,
   ValidateNested,
@@ -27,6 +28,10 @@ export class CalculateCheckoutDto {
   @IsOptional()
   @IsEnum(DeliveryType)
   deliveryType?: DeliveryType;
+
+  @IsOptional()
+  @IsString()
+  couponCode?: string;
 
   @IsOptional()
   @IsArray()

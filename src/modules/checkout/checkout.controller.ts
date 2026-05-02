@@ -8,6 +8,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { AuthUser } from '../../common/types/auth-user.type';
 import { CheckoutService } from './checkout.service';
 import { CalculateCheckoutDto } from './dto/calculate-checkout.dto';
+import { ValidateCouponDto } from '../coupons/dto/validate-coupon.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.CUSTOMER)
@@ -19,5 +20,10 @@ export class CheckoutController {
   @Post('calculate')
   calculate(@CurrentUser() user: AuthUser, @Body() dto: CalculateCheckoutDto) {
     return this.checkoutService.calculate(user.id, dto);
+  }
+
+  @Post('validate-coupon')
+  validateCoupon(@CurrentUser() user: AuthUser, @Body() dto: ValidateCouponDto) {
+    return this.checkoutService.validateCoupon(user.id, dto);
   }
 }

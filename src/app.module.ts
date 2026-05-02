@@ -18,7 +18,10 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { DeliveryModule } from './modules/delivery/delivery.module';
 import { DeliveryZonesModule } from './modules/delivery-zones/delivery-zones.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { HomeBannersModule } from './modules/home-banners/home-banners.module';
+import { CouponsModule } from './modules/coupons/coupons.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ProductsModule } from './modules/products/products.module';
@@ -54,6 +57,9 @@ import { AppService } from './app.service';
     CommissionsModule,
     DashboardModule,
     AdminModule,
+    AuditLogsModule,
+    CouponsModule,
+    NotificationsModule,
     OrdersModule,
     ReviewsModule,
     PaymentsModule,

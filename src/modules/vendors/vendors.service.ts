@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  NotificationType,
   Prisma,
   StoreStatus,
   StoreVerificationStatus,
@@ -8,6 +9,8 @@ import {
 } from '@prisma/client';
 import { CloudinaryService } from '../../common/services/cloudinary.service';
 import { PrismaService } from '../../database/prisma.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   buildPaginationMeta,
   getPagination,
@@ -31,6 +34,8 @@ export class VendorsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly notificationsService: NotificationsService,
+    private readonly auditLogsService: AuditLogsService,
   ) {}
 
   findMyStore(vendorId: string) {
@@ -133,32 +138,32 @@ export class VendorsService {
     return vendor;
   }
 
-  approve(vendorId: string) {
+  approve(vendorId: string, actorId?: string) {
     return this.updateVendorModeration(vendorId, {
       userStatus: UserStatus.ACTIVE,
       storeStatus: StoreStatus.ACTIVE,
       verificationStatus: StoreVerificationStatus.VERIFIED,
-    });
+    }, actorId, 'VENDOR_APPROVED');
   }
 
-  reject(vendorId: string) {
+  reject(vendorId: string, actorId?: string) {
     return this.updateVendorModeration(vendorId, {
       verificationStatus: StoreVerificationStatus.REJECTED,
-    });
+    }, actorId, 'VENDOR_REJECTED');
   }
 
-  suspend(vendorId: string) {
+  suspend(vendorId: string, actorId?: string) {
     return this.updateVendorModeration(vendorId, {
       userStatus: UserStatus.SUSPENDED,
       storeStatus: StoreStatus.SUSPENDED,
-    });
+    }, actorId, 'VENDOR_SUSPENDED');
   }
 
-  activate(vendorId: string) {
+  activate(vendorId: string, actorId?: string) {
     return this.updateVendorModeration(vendorId, {
       userStatus: UserStatus.ACTIVE,
       storeStatus: StoreStatus.ACTIVE,
-    });
+    }, actorId, 'VENDOR_ACTIVATED');
   }
 
   private async updateVendorModeration(
@@ -168,24 +173,61 @@ export class VendorsService {
       storeStatus?: StoreStatus;
       verificationStatus?: StoreVerificationStatus;
     },
+    actorId?: string,
+    action?: string,
   ) {
     await this.findOne(vendorId);
 
-    await this.prisma.$transaction([
-      this.prisma.user.update({
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
         where: { id: vendorId },
         data: {
           status: data.userStatus,
         },
-      }),
-      this.prisma.store.update({
+      });
+      await tx.store.update({
         where: { vendorId },
         data: {
           status: data.storeStatus,
           verificationStatus: data.verificationStatus,
         },
-      }),
-    ]);
+      });
+
+      if (action) {
+        await this.auditLogsService.log(
+          {
+            actorId,
+            action,
+            entityType: 'Vendor',
+            entityId: vendorId,
+            metadata: data,
+          },
+          tx,
+        );
+      }
+
+      if (
+        action === 'VENDOR_APPROVED' ||
+        action === 'VENDOR_REJECTED'
+      ) {
+        await this.notificationsService.create(
+          {
+            userId: vendorId,
+            title:
+              action === 'VENDOR_APPROVED'
+                ? 'Vendor approved'
+                : 'Vendor rejected',
+            message:
+              action === 'VENDOR_APPROVED'
+                ? 'Your vendor store has been approved.'
+                : 'Your vendor store has been rejected.',
+            type: NotificationType.VENDOR_APPROVED,
+            data: { vendorId, action },
+          },
+          tx,
+        );
+      }
+    });
 
     return this.findOne(vendorId);
   }

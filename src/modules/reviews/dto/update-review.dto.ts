@@ -1,5 +1,13 @@
 import { ReviewStatus } from '@prisma/client';
-import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 
 export class UpdateReviewDto {
   @IsOptional()
@@ -11,6 +19,11 @@ export class UpdateReviewDto {
   @IsOptional()
   @IsString()
   comment?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  images?: string[];
 
   @IsOptional()
   @IsEnum(ReviewStatus)

@@ -10,10 +10,10 @@ E2E tests must use a separate database.
 2. Copy `.env.test.example` to `.env.test`.
 3. Set `TEST_DATABASE_URL` to the test database URL.
 4. Make sure `TEST_DATABASE_URL` is not the same as `DATABASE_URL`.
-5. Run migrations against the test database:
+5. Run migrations against the test database.
 
 ```bash
-$env:DATABASE_URL=$env:TEST_DATABASE_URL
+$env:DATABASE_URL = (Select-String -Path .env.test -Pattern '^TEST_DATABASE_URL=').Line.Split('=', 2)[1]
 npx prisma migrate deploy
 ```
 
@@ -47,6 +47,7 @@ Never point `TEST_DATABASE_URL` at production or staging data.
 - Permission/ownership regression tests.
 - Cart and checkout regression tests.
 - Wallet and payout money-safety tests.
+- Phase 14 reviews, coupon calculation, notifications, and audit log access tests.
 
 ## Auth
 
@@ -73,6 +74,8 @@ Never point `TEST_DATABASE_URL` at production or staging data.
 - Quantity above stock fails.
 - Checkout calculation ignores frontend price and uses backend price.
 - Delivery charge comes from delivery zone.
+- Coupon discounts are validated and calculated by the backend.
+- Expired and exhausted coupons fail.
 - Commission comes from commission rule resolver.
 
 ## Order
@@ -109,6 +112,16 @@ Never point `TEST_DATABASE_URL` at production or staging data.
 - Payout above balance fails.
 - Admin reject refunds held payout.
 - Paid payout cannot be rejected.
+
+## Reviews, Notifications, and Audit Logs
+
+- Customer can review only delivered and paid orders containing the product.
+- Duplicate product/order/customer reviews fail.
+- Vendor can read only own product reviews.
+- Notification list returns only the current user's notifications.
+- Notification read and unread-count behavior works.
+- Audit log list and detail routes are admin-only.
+- Admin review moderation creates audit logs.
 
 ## Dashboard
 

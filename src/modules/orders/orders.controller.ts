@@ -102,13 +102,21 @@ export class AdminOrdersController {
   }
 
   @Patch(':id/status')
-  updateStatus(@Param('id') id: string, @Body() dto: UpdateOrderStatusDto) {
-    return this.ordersService.updateStatus(id, dto);
+  updateStatus(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateOrderStatusDto,
+  ) {
+    return this.ordersService.updateStatus(id, dto, user.id);
   }
 
   @Patch(':id/assign-delivery')
-  assignDeliveryMan(@Param('id') id: string, @Body() dto: AssignDeliveryManDto) {
-    return this.ordersService.assignDeliveryMan(id, dto);
+  assignDeliveryMan(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: AssignDeliveryManDto,
+  ) {
+    return this.ordersService.assignDeliveryMan(id, dto, user.id);
   }
 
   @Patch(':id/verify-cod-payment')
@@ -117,7 +125,7 @@ export class AdminOrdersController {
   }
 
   @Post(':id/settle-wallet')
-  settleWallet(@Param('id') id: string) {
-    return this.walletsService.settleOrderVendorEarnings(id);
+  settleWallet(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.walletsService.settleOrderVendorEarnings(id, user.id);
   }
 }

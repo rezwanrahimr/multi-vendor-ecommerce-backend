@@ -285,22 +285,22 @@ export class AdminProductsController {
   }
 
   @Patch(':id/approve')
-  approve(@Param('id') id: string) {
-    return this.productsService.approve(id);
+  approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.productsService.approve(id, user.id);
   }
 
   @Patch(':id/reject')
-  reject(@Param('id') id: string) {
-    return this.productsService.reject(id);
+  reject(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.productsService.reject(id, user.id);
   }
 
   @Patch(':id/activate')
-  activate(@Param('id') id: string) {
-    return this.productsService.activate(id);
+  activate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.productsService.activate(id, user.id);
   }
 
   @Patch(':id/deactivate')
-  deactivate(@Param('id') id: string) {
-    return this.productsService.deactivate(id);
+  deactivate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.productsService.deactivate(id, user.id);
   }
 }

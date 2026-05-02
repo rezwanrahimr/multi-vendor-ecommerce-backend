@@ -7,6 +7,7 @@ import {
 import {
   CategoryStatus,
   DeliveryStatus,
+  NotificationType,
   OrderStatus,
   PaymentMethod,
   PaymentStatus,
@@ -24,8 +25,11 @@ import {
   getPagination,
 } from '../../utils/pagination.util';
 import { CommissionsService } from '../commissions/commissions.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { CouponsService } from '../coupons/coupons.service';
 import { DeliveryType } from '../delivery-zones/dto/calculate-delivery-charge.dto';
 import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AssignDeliveryManDto } from './dto/assign-delivery-man.dto';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -63,6 +67,9 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly deliveryZonesService: DeliveryZonesService,
     private readonly commissionsService: CommissionsService,
+    private readonly couponsService: CouponsService,
+    private readonly notificationsService: NotificationsService,
+    private readonly auditLogsService: AuditLogsService,
   ) {}
 
   async create(customerId: string, dto: CreateOrderDto) {
@@ -76,6 +83,7 @@ export class OrdersService {
         );
         const products = await this.getCheckoutProducts(tx, requestedItems);
         const orderItems = [];
+        const couponItems = [];
         let subtotal = new Prisma.Decimal(0);
 
         for (const item of requestedItems) {
@@ -105,6 +113,11 @@ export class OrdersService {
           });
 
           subtotal = subtotal.add(itemSubtotal);
+          couponItems.push({
+            productId: product.id,
+            vendorId: product.vendorId,
+            categoryId: product.categoryId,
+          });
           orderItems.push({
             productId: product.id,
             vendorId: product.vendorId,
@@ -132,8 +145,18 @@ export class OrdersService {
           deliveryType,
         );
         const deliveryCharge = new Prisma.Decimal(delivery.deliveryCharge);
-        const discountAmount = new Prisma.Decimal(0);
-        const total = subtotal.add(deliveryCharge).sub(discountAmount);
+        const coupon = await this.couponsService.calculateDiscountWithClient(tx, {
+          customerId,
+          couponCode: dto.couponCode,
+          subtotal,
+          deliveryCharge,
+          items: couponItems,
+        });
+        const discountAmount = coupon?.discountAmount ?? new Prisma.Decimal(0);
+        const total = Prisma.Decimal.max(
+          subtotal.add(deliveryCharge).sub(discountAmount),
+          0,
+        );
         const paymentStatus = this.getInitialPaymentStatus(dto.paymentMethod);
 
         const order = await tx.order.create({
@@ -149,6 +172,9 @@ export class OrdersService {
             subtotal,
             deliveryCharge,
             discountAmount,
+            couponId: coupon?.couponId,
+            couponCode: coupon?.couponCode,
+            couponDiscountType: coupon?.discountType,
             total,
             shippingAddress: dto.shippingAddress as Prisma.InputJsonValue,
             customerNote: dto.customerNote,
@@ -168,6 +194,17 @@ export class OrdersService {
           },
         });
 
+        if (dto.couponCode) {
+          await this.couponsService.consumeCoupon(tx, {
+            customerId,
+            couponCode: dto.couponCode,
+            subtotal,
+            deliveryCharge,
+            items: couponItems,
+            orderId: order.id,
+          });
+        }
+
         await this.decrementProductStock(tx, orderItems, order.id, customerId);
 
         if (createdFromCart) {
@@ -179,6 +216,17 @@ export class OrdersService {
             },
           });
         }
+
+        await this.notificationsService.create(
+          {
+            userId: customerId,
+            title: 'Order created',
+            message: `Order ${order.orderNumber} has been created.`,
+            type: NotificationType.ORDER_CREATED,
+            data: { orderId: order.id, orderNumber: order.orderNumber },
+          },
+          tx,
+        );
 
         return order.id;
       },
@@ -254,8 +302,8 @@ export class OrdersService {
     });
   }
 
-  updateStatus(id: string, dto: UpdateOrderStatusDto) {
-    return this.updateOrderLifecycle(id, dto, UserRole.ADMIN);
+  updateStatus(id: string, dto: UpdateOrderStatusDto, actorId?: string) {
+    return this.updateOrderLifecycle(id, dto, UserRole.ADMIN, actorId);
   }
 
   async updateVendorStatus(
@@ -264,7 +312,7 @@ export class OrdersService {
     dto: UpdateOrderStatusDto,
   ) {
     await this.assertVendorOrder(vendorId, id);
-    return this.updateOrderLifecycle(id, dto, UserRole.VENDOR);
+    return this.updateOrderLifecycle(id, dto, UserRole.VENDOR, vendorId);
   }
 
   async cancelCustomerOrder(customerId: string, id: string) {
@@ -283,6 +331,7 @@ export class OrdersService {
       id,
       { status: OrderStatus.CANCELLED },
       UserRole.CUSTOMER,
+      customerId,
     );
   }
 
@@ -314,7 +363,7 @@ export class OrdersService {
     });
   }
 
-  async assignDeliveryMan(id: string, dto: AssignDeliveryManDto) {
+  async assignDeliveryMan(id: string, dto: AssignDeliveryManDto, actorId?: string) {
     const deliveryMan = await this.prisma.user.findFirst({
       where: {
         id: dto.deliveryManId,
@@ -331,7 +380,7 @@ export class OrdersService {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUniqueOrThrow({
         where: { id },
-        select: { status: true },
+        select: { status: true, customerId: true, orderNumber: true },
       });
 
       if (order.status !== OrderStatus.READY_FOR_PICKUP) {
@@ -340,7 +389,7 @@ export class OrdersService {
         );
       }
 
-      return tx.order.update({
+      const updatedOrder = await tx.order.update({
         where: { id },
         data: {
           deliveryManId: dto.deliveryManId,
@@ -349,6 +398,41 @@ export class OrdersService {
         },
         include: this.defaultInclude(),
       });
+
+      await this.notificationsService.create(
+        {
+          userId: dto.deliveryManId,
+          title: 'Delivery assigned',
+          message: `Order ${order.orderNumber} has been assigned to you.`,
+          type: NotificationType.DELIVERY_ASSIGNED,
+          data: { orderId: id, orderNumber: order.orderNumber },
+        },
+        tx,
+      );
+
+      await this.notificationsService.create(
+        {
+          userId: order.customerId,
+          title: 'Delivery assigned',
+          message: `A delivery person has been assigned to order ${order.orderNumber}.`,
+          type: NotificationType.DELIVERY_ASSIGNED,
+          data: { orderId: id, orderNumber: order.orderNumber },
+        },
+        tx,
+      );
+
+      await this.auditLogsService.log(
+        {
+          actorId,
+          action: 'DELIVERY_ASSIGNED',
+          entityType: 'Order',
+          entityId: id,
+          metadata: { deliveryManId: dto.deliveryManId },
+        },
+        tx,
+      );
+
+      return updatedOrder;
     });
   }
 
@@ -356,6 +440,7 @@ export class OrdersService {
     id: string,
     dto: UpdateOrderStatusDto,
     actorRole: UserRole,
+    actorId?: string,
   ) {
     if (!dto.status && !dto.deliveryStatus) {
       throw new BadRequestException('No status change was provided');
@@ -388,6 +473,34 @@ export class OrdersService {
         order.status !== OrderStatus.CANCELLED
       ) {
         await this.restoreCancelledOrderStock(tx, order.items, id);
+      }
+
+      if (dto.status && dto.status !== order.status) {
+        await this.notificationsService.create(
+          {
+            userId: order.customerId,
+            title: 'Order status updated',
+            message: `Order ${order.orderNumber} is now ${dto.status}.`,
+            type: NotificationType.ORDER_STATUS_UPDATED,
+            data: { orderId: id, status: dto.status },
+          },
+          tx,
+        );
+
+        await this.auditLogsService.log(
+          {
+            actorId,
+            action: 'ORDER_STATUS_CHANGED',
+            entityType: 'Order',
+            entityId: id,
+            metadata: {
+              from: order.status,
+              to: dto.status,
+              actorRole,
+            },
+          },
+          tx,
+        );
       }
 
       return updatedOrder;

@@ -107,6 +107,30 @@ enum ReviewStatus {
   HIDDEN
 }
 
+enum CouponDiscountType {
+  PERCENTAGE
+  FIXED
+  FREE_DELIVERY
+}
+
+enum NotificationType {
+  ORDER_CREATED
+  ORDER_STATUS_UPDATED
+  PAYMENT_SUBMITTED
+  PAYMENT_VERIFIED
+  PAYMENT_REJECTED
+  DELIVERY_ASSIGNED
+  DELIVERY_STATUS_UPDATED
+  VENDOR_APPROVED
+  PRODUCT_APPROVED
+  PRODUCT_REJECTED
+  PAYOUT_REQUESTED
+  PAYOUT_APPROVED
+  PAYOUT_PAID
+  PAYOUT_REJECTED
+  REVIEW_CREATED
+}
+
 enum WalletTransactionType {
   CREDIT
   DEBIT
@@ -148,6 +172,10 @@ model User {
   commissionRules CommissionRule[]
   stockLogs      StockLog[] @relation("StockLogChangedBy")
   reviews        Review[]
+  notifications  Notification[]
+  auditLogs      AuditLog[] @relation("AuditLogActor")
+  couponUsages   CouponUsage[]
+  vendorCoupons  Coupon[] @relation("VendorCoupons")
   wallet         Wallet?
   cart           Cart?
 
@@ -202,6 +230,7 @@ model Category {
   children Category[] @relation("CategoryTree")
   products Product[]
   commissionRules CommissionRule[]
+  coupons  Coupon[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -247,6 +276,7 @@ model Product {
   cartItems  CartItem[]
   stockLogs  StockLog[]
   reviews    Review[]
+  coupons    Coupon[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -348,6 +378,9 @@ model Order {
   subtotal        Decimal       @db.Decimal(10, 2)
   deliveryCharge  Decimal       @default(0) @db.Decimal(10, 2)
   discountAmount  Decimal       @default(0) @db.Decimal(10, 2)
+  couponId        String?
+  couponCode      String?
+  couponDiscountType CouponDiscountType?
   total           Decimal       @db.Decimal(10, 2)
   shippingAddress Json
   customerNote    String?
@@ -358,8 +391,11 @@ model Order {
   customer     User          @relation("CustomerOrders", fields: [customerId], references: [id], onDelete: Restrict)
   deliveryMan  User?         @relation("DeliveryOrders", fields: [deliveryManId], references: [id], onDelete: SetNull)
   deliveryZone DeliveryZone? @relation(fields: [deliveryZoneId], references: [id], onDelete: SetNull)
+  coupon       Coupon?       @relation(fields: [couponId], references: [id], onDelete: SetNull)
   items        OrderItem[]
   payment      Payment?
+  reviews      Review[]
+  couponUsages CouponUsage[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -371,6 +407,7 @@ model Order {
   @@index([deliveryStatus])
   @@index([paymentStatus])
   @@index([vendorSettledAt])
+  @@index([couponId])
 }
 
 model OrderItem {
@@ -410,20 +447,118 @@ model Review {
   id         String       @id @default(uuid())
   productId  String
   customerId String
+  orderId    String?
   rating     Int
   comment    String?
-  status     ReviewStatus @default(PUBLISHED)
+  images     String[]     @default([])
+  status     ReviewStatus @default(PENDING)
 
   product  Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   customer User    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  order    Order?  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([productId, customerId])
+  @@unique([orderId, productId, customerId])
   @@index([productId])
   @@index([customerId])
+  @@index([orderId])
   @@index([status])
+}
+
+model Coupon {
+  id                 String             @id @default(uuid())
+  code               String             @unique
+  title              String
+  description        String?
+  discountType       CouponDiscountType
+  discountValue      Decimal            @default(0) @db.Decimal(10, 2)
+  maxDiscount        Decimal?           @db.Decimal(10, 2)
+  minimumOrderAmount Decimal?           @db.Decimal(10, 2)
+  usageLimit         Int?
+  usedCount          Int                @default(0)
+  perUserLimit       Int?
+  startsAt           DateTime?
+  endsAt             DateTime?
+  isActive           Boolean            @default(true)
+  vendorId           String?
+  categoryId         String?
+  productId          String?
+
+  vendor   User?      @relation("VendorCoupons", fields: [vendorId], references: [id], onDelete: SetNull)
+  category Category?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  product  Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
+  orders   Order[]
+  usages   CouponUsage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([code])
+  @@index([isActive])
+  @@index([vendorId])
+  @@index([categoryId])
+  @@index([productId])
+}
+
+model CouponUsage {
+  id         String @id @default(uuid())
+  couponId   String
+  customerId String
+  orderId    String?
+
+  coupon   Coupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  customer User   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  order    Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@unique([couponId, orderId])
+  @@index([couponId])
+  @@index([customerId])
+  @@index([orderId])
+}
+
+model Notification {
+  id      String           @id @default(uuid())
+  userId  String
+  title   String
+  message String
+  type    NotificationType
+  data    Json?
+  isRead  Boolean          @default(false)
+  readAt  DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, isRead])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id         String  @id @default(uuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?
+  userAgent  String?
+
+  actor User? @relation("AuditLogActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([createdAt])
 }
 
 model Payment {

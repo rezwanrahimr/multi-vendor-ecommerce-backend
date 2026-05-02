@@ -9,6 +9,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { CommissionsService } from '../commissions/commissions.service';
+import { CouponsService } from '../coupons/coupons.service';
 import { DeliveryType } from '../delivery-zones/dto/calculate-delivery-charge.dto';
 import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
 import { CalculateCheckoutDto, CheckoutItemDto } from './dto/calculate-checkout.dto';
@@ -19,6 +20,7 @@ export class CheckoutService {
     private readonly prisma: PrismaService,
     private readonly deliveryZonesService: DeliveryZonesService,
     private readonly commissionsService: CommissionsService,
+    private readonly couponsService: CouponsService,
   ) {}
 
   async calculate(customerId: string, dto: CalculateCheckoutDto) {
@@ -105,9 +107,19 @@ export class CheckoutService {
       subtotal,
       deliveryType,
     );
-    const discountAmount = new Prisma.Decimal(0);
     const deliveryCharge = new Prisma.Decimal(delivery.deliveryCharge);
-    const grandTotal = subtotal.add(deliveryCharge).minus(discountAmount);
+    const coupon = await this.couponsService.calculateDiscount({
+      customerId,
+      couponCode: dto.couponCode,
+      subtotal,
+      deliveryCharge,
+      items: calculatedItems,
+    });
+    const discountAmount = coupon?.discountAmount ?? new Prisma.Decimal(0);
+    const grandTotal = Prisma.Decimal.max(
+      subtotal.add(deliveryCharge).minus(discountAmount),
+      0,
+    );
     const totalQuantity = calculatedItems.reduce(
       (sum, item) => sum + item.quantity,
       0,
@@ -129,8 +141,26 @@ export class CheckoutService {
         estimatedDeliveryTime: delivery.estimatedDeliveryTime,
         isFreeDelivery: delivery.isFreeDelivery,
       },
+      coupon: coupon
+        ? {
+            couponId: coupon.couponId,
+            code: coupon.couponCode,
+            discountType: coupon.discountType,
+            discountAmount: coupon.discountAmount.toNumber(),
+          }
+        : null,
       vendorBreakdown: this.buildVendorBreakdown(calculatedItems),
     };
+  }
+
+  async validateCoupon(customerId: string, dto: CalculateCheckoutDto) {
+    const result = await this.calculate(customerId, dto);
+
+    if (!result.coupon) {
+      throw new BadRequestException('Coupon code is required');
+    }
+
+    return result.coupon;
   }
 
   private async resolveRequestedItems(

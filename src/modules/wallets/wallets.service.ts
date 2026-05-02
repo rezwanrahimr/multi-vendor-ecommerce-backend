@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  NotificationType,
   OrderStatus,
   PaymentStatus,
   Prisma,
@@ -13,6 +14,8 @@ import {
   WithdrawalStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   buildPaginationMeta,
   getPagination,
@@ -26,9 +29,13 @@ import { WalletTransactionQueryDto } from './dto/wallet-transaction-query.dto';
 
 @Injectable()
 export class WalletsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+    private readonly auditLogsService: AuditLogsService,
+  ) {}
 
-  async settleOrderVendorEarnings(orderId: string) {
+  async settleOrderVendorEarnings(orderId: string, actorId?: string) {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUniqueOrThrow({
         where: { id: orderId },
@@ -162,6 +169,17 @@ export class WalletsService {
           where: { id: orderId },
           data: { vendorSettledAt: new Date() },
         });
+
+        await this.auditLogsService.log(
+          {
+            actorId,
+            action: 'WALLET_SETTLED',
+            entityType: 'Order',
+            entityId: orderId,
+            metadata: { settled },
+          },
+          tx,
+        );
       }
 
       return {
@@ -324,6 +342,17 @@ export class WalletsService {
         },
       });
 
+      await this.notificationsService.create(
+        {
+          userId: vendorId,
+          title: 'Payout requested',
+          message: 'Your payout request has been submitted.',
+          type: NotificationType.PAYOUT_REQUESTED,
+          data: { payoutId: withdrawal.id, amount: amount.toNumber() },
+        },
+        tx,
+      );
+
       return withdrawal;
     });
   }
@@ -372,7 +401,7 @@ export class WalletsService {
         throw new BadRequestException('Only pending payout requests can be approved');
       }
 
-      return tx.withdrawalRequest.update({
+      const updated = await tx.withdrawalRequest.update({
         where: { id },
         data: {
           status: WithdrawalStatus.APPROVED,
@@ -381,6 +410,30 @@ export class WalletsService {
         },
         include: this.payoutInclude(),
       });
+
+      await this.notificationsService.create(
+        {
+          userId: updated.wallet.vendorId,
+          title: 'Payout approved',
+          message: 'Your payout request has been approved.',
+          type: NotificationType.PAYOUT_APPROVED,
+          data: { payoutId: id },
+        },
+        tx,
+      );
+
+      await this.auditLogsService.log(
+        {
+          actorId: adminId,
+          action: 'PAYOUT_APPROVED',
+          entityType: 'WithdrawalRequest',
+          entityId: id,
+          metadata: { amount: updated.amount.toNumber() },
+        },
+        tx,
+      );
+
+      return updated;
     });
   }
 
@@ -401,7 +454,7 @@ export class WalletsService {
 
       await this.refundHeldPayout(tx, payout, dto.reason);
 
-      return tx.withdrawalRequest.update({
+      const updated = await tx.withdrawalRequest.update({
         where: { id },
         data: {
           status: WithdrawalStatus.REJECTED,
@@ -410,6 +463,30 @@ export class WalletsService {
         },
         include: this.payoutInclude(),
       });
+
+      await this.notificationsService.create(
+        {
+          userId: updated.wallet.vendorId,
+          title: 'Payout rejected',
+          message: 'Your payout request has been rejected.',
+          type: NotificationType.PAYOUT_REJECTED,
+          data: { payoutId: id },
+        },
+        tx,
+      );
+
+      await this.auditLogsService.log(
+        {
+          actorId: adminId,
+          action: 'PAYOUT_REJECTED',
+          entityType: 'WithdrawalRequest',
+          entityId: id,
+          metadata: { reason: dto.reason },
+        },
+        tx,
+      );
+
+      return updated;
     });
   }
 
@@ -459,7 +536,7 @@ export class WalletsService {
         },
       });
 
-      return tx.withdrawalRequest.update({
+      const updated = await tx.withdrawalRequest.update({
         where: { id },
         data: {
           status: WithdrawalStatus.PAID,
@@ -470,6 +547,30 @@ export class WalletsService {
         },
         include: this.payoutInclude(),
       });
+
+      await this.notificationsService.create(
+        {
+          userId: updated.wallet.vendorId,
+          title: 'Payout paid',
+          message: 'Your payout request has been marked paid.',
+          type: NotificationType.PAYOUT_PAID,
+          data: { payoutId: id, transactionId: dto.transactionId },
+        },
+        tx,
+      );
+
+      await this.auditLogsService.log(
+        {
+          actorId: adminId,
+          action: 'PAYOUT_PAID',
+          entityType: 'WithdrawalRequest',
+          entityId: id,
+          metadata: { transactionId: dto.transactionId },
+        },
+        tx,
+      );
+
+      return updated;
     });
   }
 

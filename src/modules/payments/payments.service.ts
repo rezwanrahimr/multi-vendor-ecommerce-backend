@@ -4,12 +4,15 @@ import {
   Injectable,
 } from '@nestjs/common';
 import {
+  NotificationType,
   OrderStatus,
   PaymentMethod,
   PaymentStatus,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   buildPaginationMeta,
   getPagination,
@@ -21,7 +24,11 @@ import { SubmitManualPaymentDto } from './dto/submit-manual-payment.dto';
 
 @Injectable()
 export class PaymentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+    private readonly auditLogsService: AuditLogsService,
+  ) {}
 
   async submitManualPayment(
     customerId: string,
@@ -87,6 +94,17 @@ export class PaymentsService {
           paymentStatus: PaymentStatus.PENDING_VERIFICATION,
         },
       });
+
+      await this.notificationsService.create(
+        {
+          userId: customerId,
+          title: 'Payment submitted',
+          message: `Payment proof for order ${order.orderNumber} is pending review.`,
+          type: NotificationType.PAYMENT_SUBMITTED,
+          data: { paymentId: payment.id, orderId: order.id },
+        },
+        tx,
+      );
 
       return payment;
     });
@@ -188,6 +206,30 @@ export class PaymentsService {
         data: { paymentStatus: PaymentStatus.PAID },
       });
 
+      if (payment.customerId) {
+        await this.notificationsService.create(
+          {
+            userId: payment.customerId,
+            title: 'Payment verified',
+            message: `Payment for order ${payment.order.orderNumber} was verified.`,
+            type: NotificationType.PAYMENT_VERIFIED,
+            data: { paymentId: id, orderId: payment.orderId },
+          },
+          tx,
+        );
+      }
+
+      await this.auditLogsService.log(
+        {
+          actorId: adminId,
+          action: 'PAYMENT_VERIFIED',
+          entityType: 'Payment',
+          entityId: id,
+          metadata: { orderId: payment.orderId, amount: payment.amount.toNumber() },
+        },
+        tx,
+      );
+
       return updatedPayment;
     });
   }
@@ -205,6 +247,7 @@ export class PaymentsService {
     return this.prisma.$transaction(async (tx) => {
       const payment = await tx.payment.findUniqueOrThrow({
         where: { id },
+        include: { order: { select: { orderNumber: true } } },
       });
 
       this.assertPendingVerification(payment.paymentStatus);
@@ -224,6 +267,33 @@ export class PaymentsService {
         where: { id: payment.orderId },
         data: { paymentStatus: PaymentStatus.REJECTED },
       });
+
+      if (payment.customerId) {
+        await this.notificationsService.create(
+          {
+            userId: payment.customerId,
+            title: 'Payment rejected',
+            message: `Payment for order ${payment.order.orderNumber} was rejected.`,
+            type: NotificationType.PAYMENT_REJECTED,
+            data: { paymentId: id, orderId: payment.orderId },
+          },
+          tx,
+        );
+      }
+
+      await this.auditLogsService.log(
+        {
+          actorId: adminId,
+          action: 'PAYMENT_REJECTED',
+          entityType: 'Payment',
+          entityId: id,
+          metadata: {
+            orderId: payment.orderId,
+            reason: dto.rejectionReason,
+          },
+        },
+        tx,
+      );
 
       return updatedPayment;
     });

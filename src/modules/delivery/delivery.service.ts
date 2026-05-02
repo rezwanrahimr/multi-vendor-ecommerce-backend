@@ -5,12 +5,14 @@ import {
 } from '@nestjs/common';
 import {
   DeliveryStatus,
+  NotificationType,
   OrderStatus,
   PaymentMethod,
   PaymentStatus,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   buildPaginationMeta,
   getPagination,
@@ -35,7 +37,10 @@ const DELIVERY_TRANSITIONS: Record<DeliveryStatus, DeliveryStatus[]> = {
 
 @Injectable()
 export class DeliveryService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   async getDashboard(deliveryManId: string) {
     const { start, end } = this.getDayBounds();
@@ -279,6 +284,17 @@ export class DeliveryService {
           data: paymentUpdate,
         });
       }
+
+      await this.notificationsService.create(
+        {
+          userId: order.customerId,
+          title: 'Delivery status updated',
+          message: `Your delivery is now ${dto.deliveryStatus}.`,
+          type: NotificationType.DELIVERY_STATUS_UPDATED,
+          data: { orderId, deliveryStatus: dto.deliveryStatus },
+        },
+        tx,
+      );
 
       return updatedOrder;
     });

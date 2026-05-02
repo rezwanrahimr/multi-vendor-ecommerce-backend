@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import {
   CategoryStatus,
+  NotificationType,
   Prisma,
   ProductStatus,
   StockLogType,
@@ -16,6 +17,8 @@ import {
 import { CloudinaryService } from '../../common/services/cloudinary.service';
 import { UploadedImageFile } from '../../common/pipes/images-upload.pipe';
 import { PrismaService } from '../../database/prisma.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   buildPaginationMeta,
   getPagination,
@@ -30,6 +33,8 @@ export class ProductsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly notificationsService: NotificationsService,
+    private readonly auditLogsService: AuditLogsService,
   ) {}
 
   async create(
@@ -322,20 +327,20 @@ export class ProductsService {
     return product;
   }
 
-  approve(id: string) {
-    return this.updateStatus(id, ProductStatus.ACTIVE);
+  approve(id: string, actorId?: string) {
+    return this.updateStatus(id, ProductStatus.ACTIVE, actorId, 'PRODUCT_APPROVED');
   }
 
-  reject(id: string) {
-    return this.updateStatus(id, ProductStatus.REJECTED);
+  reject(id: string, actorId?: string) {
+    return this.updateStatus(id, ProductStatus.REJECTED, actorId, 'PRODUCT_REJECTED');
   }
 
-  activate(id: string) {
-    return this.updateStatus(id, ProductStatus.ACTIVE);
+  activate(id: string, actorId?: string) {
+    return this.updateStatus(id, ProductStatus.ACTIVE, actorId, 'PRODUCT_ACTIVATED');
   }
 
-  deactivate(id: string) {
-    return this.updateStatus(id, ProductStatus.INACTIVE);
+  deactivate(id: string, actorId?: string) {
+    return this.updateStatus(id, ProductStatus.INACTIVE, actorId, 'PRODUCT_DEACTIVATED');
   }
 
   private defaultInclude() {
@@ -516,11 +521,62 @@ export class ProductsService {
     return undefined;
   }
 
-  private updateStatus(id: string, status: ProductStatus) {
-    return this.prisma.product.update({
-      where: { id },
-      data: { status },
-      include: this.defaultInclude(),
+  private updateStatus(
+    id: string,
+    status: ProductStatus,
+    actorId?: string,
+    action?: string,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.product.findUniqueOrThrow({
+        where: { id },
+        select: { status: true, vendorId: true, name: true },
+      });
+      const product = await tx.product.update({
+        where: { id },
+        data: { status },
+        include: this.defaultInclude(),
+      });
+
+      if (action) {
+        await this.auditLogsService.log(
+          {
+            actorId,
+            action,
+            entityType: 'Product',
+            entityId: id,
+            metadata: { from: current.status, to: status },
+          },
+          tx,
+        );
+      }
+
+      if (
+        action === 'PRODUCT_APPROVED' ||
+        action === 'PRODUCT_REJECTED'
+      ) {
+        await this.notificationsService.create(
+          {
+            userId: current.vendorId,
+            title:
+              action === 'PRODUCT_APPROVED'
+                ? 'Product approved'
+                : 'Product rejected',
+            message:
+              action === 'PRODUCT_APPROVED'
+                ? `${current.name} has been approved.`
+                : `${current.name} has been rejected.`,
+            type:
+              action === 'PRODUCT_APPROVED'
+                ? NotificationType.PRODUCT_APPROVED
+                : NotificationType.PRODUCT_REJECTED,
+            data: { productId: id },
+          },
+          tx,
+        );
+      }
+
+      return product;
     });
   }
 

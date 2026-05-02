@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { CloudinaryService } from '../../common/services/cloudinary.service';
+import { AuditLogsModule } from '../audit-logs/audit-logs.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import {
   AdminProductsController,
   ProductsController,
@@ -8,6 +10,7 @@ import {
 import { ProductsService } from './products.service';
 
 @Module({
+  imports: [NotificationsModule, AuditLogsModule],
   controllers: [
     ProductsController,
     VendorProductsController,

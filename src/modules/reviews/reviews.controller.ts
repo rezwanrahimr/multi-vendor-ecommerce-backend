@@ -10,41 +10,103 @@ import { CreateReviewDto } from './dto/create-review.dto';
 import { UpdateReviewDto } from './dto/update-review.dto';
 import { ReviewsService } from './reviews.service';
 
-@ApiTags('Reviews')
-@Controller('reviews')
-export class ReviewsController {
+@ApiTags('Product Reviews')
+@Controller('products/:productId/reviews')
+export class ProductReviewsController {
   constructor(private readonly reviewsService: ReviewsService) {}
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.CUSTOMER)
   @Post()
-  create(@CurrentUser() user: AuthUser, @Body() dto: CreateReviewDto) {
-    return this.reviewsService.create(user.id, dto);
+  create(
+    @CurrentUser() user: AuthUser,
+    @Param('productId') productId: string,
+    @Body() dto: CreateReviewDto,
+  ) {
+    return this.reviewsService.create(user.id, productId, dto);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Get()
+  findByProduct(@Param('productId') productId: string) {
+    return this.reviewsService.findPublicByProduct(productId);
+  }
+}
+
+@ApiTags('Product Rating Summary')
+@Controller('products/:productId/rating-summary')
+export class ProductRatingSummaryController {
+  constructor(private readonly reviewsService: ReviewsService) {}
+
+  @Get()
+  getSummary(@Param('productId') productId: string) {
+    return this.reviewsService.getRatingSummary(productId);
+  }
+}
+
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.CUSTOMER)
+@ApiTags('Customer Reviews')
+@Controller('customer/reviews')
+export class CustomerReviewsController {
+  constructor(private readonly reviewsService: ReviewsService) {}
+
+  @Get()
+  findMine(@CurrentUser() user: AuthUser) {
+    return this.reviewsService.findCustomerReviews(user.id);
+  }
+
+  @Patch(':id')
+  updateMine(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateReviewDto,
+  ) {
+    return this.reviewsService.updateCustomerReview(user.id, id, dto);
+  }
+
+  @Delete(':id')
+  removeMine(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.reviewsService.removeCustomerReview(user.id, id);
+  }
+}
+
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN)
+@ApiTags('Admin Reviews')
+@Controller('admin/reviews')
+export class AdminReviewsController {
+  constructor(private readonly reviewsService: ReviewsService) {}
+
   @Get()
   findAll() {
     return this.reviewsService.findAll();
   }
 
-  @Get('product/:productId')
-  findByProduct(@Param('productId') productId: string) {
-    return this.reviewsService.findByProduct(productId);
+  @Patch(':id/approve')
+  approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.reviewsService.approve(id, user.id);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN, UserRole.CUSTOMER)
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateReviewDto) {
-    return this.reviewsService.update(id, dto);
+  @Patch(':id/hide')
+  hide(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.reviewsService.hide(id, user.id);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.reviewsService.remove(id);
+  remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.reviewsService.remove(id, user.id);
+  }
+}
+
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.VENDOR)
+@ApiTags('Vendor Reviews')
+@Controller('vendor/reviews')
+export class VendorReviewsController {
+  constructor(private readonly reviewsService: ReviewsService) {}
+
+  @Get()
+  findMine(@CurrentUser() user: AuthUser) {
+    return this.reviewsService.findVendorReviews(user.id);
   }
 }

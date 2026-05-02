@@ -17,12 +17,22 @@ describe('PaymentsService manual payment safety', () => {
     },
     $transaction: jest.fn(),
   };
+  const notificationsService = {
+    create: jest.fn(),
+  };
+  const auditLogsService = {
+    log: jest.fn(),
+  };
 
   let service: PaymentsService;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new PaymentsService(prisma as never);
+    service = new PaymentsService(
+      prisma as never,
+      notificationsService as never,
+      auditLogsService as never,
+    );
   });
 
   it('rejects unsupported customer payment methods', async () => {

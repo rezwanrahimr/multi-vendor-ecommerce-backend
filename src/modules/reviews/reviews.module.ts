@@ -1,9 +1,24 @@
 import { Module } from '@nestjs/common';
-import { ReviewsController } from './reviews.controller';
+import { AuditLogsModule } from '../audit-logs/audit-logs.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import {
+  AdminReviewsController,
+  CustomerReviewsController,
+  ProductRatingSummaryController,
+  ProductReviewsController,
+  VendorReviewsController,
+} from './reviews.controller';
 import { ReviewsService } from './reviews.service';
 
 @Module({
-  controllers: [ReviewsController],
+  imports: [NotificationsModule, AuditLogsModule],
+  controllers: [
+    ProductReviewsController,
+    ProductRatingSummaryController,
+    CustomerReviewsController,
+    AdminReviewsController,
+    VendorReviewsController,
+  ],
   providers: [ReviewsService],
   exports: [ReviewsService],
 })

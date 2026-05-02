@@ -81,22 +81,22 @@ export class AdminVendorsController {
   }
 
   @Patch(':id/approve')
-  approve(@Param('id') id: string) {
-    return this.vendorsService.approve(id);
+  approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.vendorsService.approve(id, user.id);
   }
 
   @Patch(':id/reject')
-  reject(@Param('id') id: string) {
-    return this.vendorsService.reject(id);
+  reject(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.vendorsService.reject(id, user.id);
   }
 
   @Patch(':id/suspend')
-  suspend(@Param('id') id: string) {
-    return this.vendorsService.suspend(id);
+  suspend(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.vendorsService.suspend(id, user.id);
   }
 
   @Patch(':id/activate')
-  activate(@Param('id') id: string) {
-    return this.vendorsService.activate(id);
+  activate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.vendorsService.activate(id, user.id);
   }
 }
