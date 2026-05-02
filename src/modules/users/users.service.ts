@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../database/prisma.service';
@@ -7,7 +7,9 @@ import {
   getPagination,
 } from '../../utils/pagination.util';
 import { createSlug } from '../../utils/slug.util';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateMeDto } from './dto/update-me.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserQueryDto } from './dto/user-query.dto';
 
@@ -82,6 +84,56 @@ export class UsersService {
   findOne(id: string) {
     return this.prisma.user.findUniqueOrThrow({
       where: { id },
+      select: this.defaultSelect(),
+    });
+  }
+
+  findMe(id: string) {
+    return this.findOne(id);
+  }
+
+  updateMe(id: string, dto: UpdateMeDto) {
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        name: dto.name,
+        phone: dto.phone,
+      },
+      select: this.defaultSelect(),
+    });
+  }
+
+  async changePassword(id: string, dto: ChangePasswordDto) {
+    if (dto.newPassword !== dto.confirmPassword) {
+      throw new BadRequestException('New password and confirm password do not match');
+    }
+
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id },
+      select: {
+        id: true,
+        passwordHash: true,
+      },
+    });
+
+    if (!user.passwordHash) {
+      throw new BadRequestException('Password change is unavailable for this account');
+    }
+
+    const isCurrentPasswordValid = await bcrypt.compare(
+      dto.currentPassword,
+      user.passwordHash,
+    );
+
+    if (!isCurrentPasswordValid) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, 12);
+
+    return this.prisma.user.update({
+      where: { id },
+      data: { passwordHash },
       select: this.defaultSelect(),
     });
   }

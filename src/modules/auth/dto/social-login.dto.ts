@@ -1,5 +1,5 @@
 import { AuthProvider, UserRole } from '@prisma/client';
-import { IsEmail, IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsEmail, IsEnum, IsIn, IsOptional, IsString } from 'class-validator';
 
 export class SocialLoginDto {
   @IsEnum(AuthProvider)
@@ -19,6 +19,6 @@ export class SocialLoginDto {
   avatarUrl?: string;
 
   @IsOptional()
-  @IsEnum(UserRole)
+  @IsIn([UserRole.CUSTOMER, UserRole.VENDOR])
   role?: UserRole;
 }

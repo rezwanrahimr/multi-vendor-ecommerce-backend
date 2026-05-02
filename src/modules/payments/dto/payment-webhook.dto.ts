@@ -6,7 +6,7 @@ export class PaymentWebhookDto {
   transactionId: string;
 
   @IsEnum(PaymentStatus)
-  status: PaymentStatus;
+  paymentStatus: PaymentStatus;
 
   @IsOptional()
   @IsObject()

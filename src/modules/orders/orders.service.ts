@@ -4,8 +4,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  DeliveryAreaStatus,
+  CommissionType,
+  DeliveryStatus,
   OrderStatus,
+  PaymentMethod,
+  PaymentStatus,
   Prisma,
   StockLogType,
   WalletTransactionType,
@@ -77,8 +80,13 @@ export class OrdersService {
           storeId: product.storeId,
           quantity: item.quantity,
           unitPrice,
+          priceSnapshot: unitPrice,
           totalPrice,
+          subtotal: totalPrice,
+          commissionType: CommissionType.PERCENTAGE,
+          commissionValue: product.store.commissionRate,
           adminCommission,
+          commissionAmount: adminCommission,
           vendorEarning,
         };
       });
@@ -87,17 +95,18 @@ export class OrdersService {
         (sum, item) => sum.add(item.totalPrice),
         new Prisma.Decimal(0),
       );
-      const deliveryFee = await this.resolveDeliveryFee(tx, dto);
-      const discountAmount = new Prisma.Decimal(dto.discountAmount ?? 0);
-      const total = subtotal.add(deliveryFee).sub(discountAmount);
+      const deliveryCharge = await this.resolveDeliveryCharge(tx, dto, subtotal);
+      const discountAmount = new Prisma.Decimal(0);
+      const total = subtotal.add(deliveryCharge).sub(discountAmount);
 
       const order = await tx.order.create({
         data: {
           orderNumber: this.createOrderNumber(),
           customerId,
-          deliveryAreaId: dto.deliveryAreaId,
+          deliveryZoneId: dto.deliveryZoneId ?? dto.deliveryAreaId,
+          paymentMethod: dto.paymentMethod ?? PaymentMethod.COD,
           subtotal,
-          deliveryFee,
+          deliveryCharge,
           discountAmount,
           total,
           shippingAddress: dto.shippingAddress as Prisma.InputJsonValue,
@@ -203,7 +212,11 @@ export class OrdersService {
   assignDeliveryMan(id: string, dto: AssignDeliveryManDto) {
     return this.prisma.order.update({
       where: { id },
-      data: { deliveryManId: dto.deliveryManId },
+      data: {
+        deliveryManId: dto.deliveryManId,
+        deliveryStatus: DeliveryStatus.ASSIGNED,
+        status: OrderStatus.ASSIGNED_TO_DELIVERY,
+      },
       include: this.defaultInclude(),
     });
   }
@@ -231,7 +244,7 @@ export class OrdersService {
           phone: true,
         },
       },
-      deliveryArea: true,
+      deliveryZone: true,
       items: {
         include: {
           product: true,
@@ -242,27 +255,38 @@ export class OrdersService {
     } as const;
   }
 
-  private async resolveDeliveryFee(
+  private async resolveDeliveryCharge(
     tx: Prisma.TransactionClient,
     dto: CreateOrderDto,
+    subtotal: Prisma.Decimal,
   ) {
-    if (!dto.deliveryAreaId) {
-      return new Prisma.Decimal(dto.deliveryFee ?? 0);
+    const deliveryZoneId = dto.deliveryZoneId ?? dto.deliveryAreaId;
+
+    if (!deliveryZoneId) {
+      throw new BadRequestException('Delivery zone is required');
     }
 
-    const deliveryArea = await tx.deliveryArea.findUnique({
-      where: { id: dto.deliveryAreaId },
+    const deliveryZone = await tx.deliveryZone.findUnique({
+      where: { id: deliveryZoneId },
       select: {
-        fee: true,
-        status: true,
+        baseCharge: true,
+        freeDeliveryMinAmount: true,
+        isActive: true,
       },
     });
 
-    if (!deliveryArea || deliveryArea.status !== DeliveryAreaStatus.ACTIVE) {
-      throw new BadRequestException('Selected delivery area is unavailable');
+    if (!deliveryZone || !deliveryZone.isActive) {
+      throw new BadRequestException('Selected delivery zone is unavailable');
     }
 
-    return deliveryArea.fee;
+    if (
+      deliveryZone.freeDeliveryMinAmount &&
+      subtotal.gte(deliveryZone.freeDeliveryMinAmount)
+    ) {
+      return new Prisma.Decimal(0);
+    }
+
+    return deliveryZone.baseCharge;
   }
 
   private async decrementProductStock(
@@ -339,6 +363,7 @@ export class OrdersService {
       where: {
         id: orderId,
         status: OrderStatus.DELIVERED,
+        paymentStatus: PaymentStatus.PAID,
         vendorSettledAt: null,
       },
       data: {

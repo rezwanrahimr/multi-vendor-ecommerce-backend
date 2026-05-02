@@ -1,5 +1,5 @@
 import { ProductStatus } from '@prisma/client';
-import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 export class ProductQueryDto {
   @IsOptional()
@@ -7,15 +7,15 @@ export class ProductQueryDto {
   search?: string;
 
   @IsOptional()
-  @IsString()
+  @IsUUID()
   categoryId?: string;
 
   @IsOptional()
-  @IsString()
+  @IsUUID()
   vendorId?: string;
 
   @IsOptional()
-  @IsString()
+  @IsUUID()
   storeId?: string;
 
   @IsOptional()

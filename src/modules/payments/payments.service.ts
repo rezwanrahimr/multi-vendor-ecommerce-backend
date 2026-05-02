@@ -12,17 +12,20 @@ export class PaymentsService {
     const payment = await this.prisma.payment.create({
       data: {
         orderId: dto.orderId,
-        method: dto.method,
-        provider: dto.provider,
+        paymentMethod: dto.paymentMethod,
         transactionId: dto.transactionId,
+        senderPhone: dto.senderPhone,
+        paymentScreenshotUrl: dto.paymentScreenshotUrl,
+        paymentScreenshotPublicId: dto.paymentScreenshotPublicId,
         amount: dto.amount,
-        status: dto.status,
+        paymentStatus: dto.paymentStatus,
+        rejectionReason: dto.rejectionReason,
         metadata: dto.metadata as Prisma.InputJsonValue | undefined,
       },
       include: { order: true },
     });
 
-    if (payment.status === PaymentStatus.PAID) {
+    if (payment.paymentStatus === PaymentStatus.PAID) {
       await this.prisma.order.update({
         where: { id: payment.orderId },
         data: { paymentStatus: PaymentStatus.PAID },
@@ -50,7 +53,7 @@ export class PaymentsService {
     const payment = await this.prisma.payment.update({
       where: { transactionId: dto.transactionId },
       data: {
-        status: dto.status,
+        paymentStatus: dto.paymentStatus,
         metadata: dto.metadata as Prisma.InputJsonValue | undefined,
       },
       include: { order: true },
@@ -58,7 +61,7 @@ export class PaymentsService {
 
     await this.prisma.order.update({
       where: { id: payment.orderId },
-      data: { paymentStatus: dto.status },
+      data: { paymentStatus: dto.paymentStatus },
     });
 
     return payment;

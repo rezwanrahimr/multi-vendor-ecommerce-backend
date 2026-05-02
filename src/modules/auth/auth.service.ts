@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { AuthProvider, User, UserRole } from '@prisma/client';
+import { User, UserRole, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../database/prisma.service';
 import { createSlug } from '../../utils/slug.util';
@@ -75,44 +75,18 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
+    if (user.status !== UserStatus.ACTIVE) {
+      throw new UnauthorizedException('Account is inactive or suspended');
+    }
+
     return this.buildAuthResponse(user);
   }
 
   async socialLogin(dto: SocialLoginDto) {
-    const role =
-      dto.role === UserRole.VENDOR ? UserRole.VENDOR : UserRole.CUSTOMER;
-    const user = await this.prisma.user.upsert({
-      where: {
-        authProvider_providerId: {
-          authProvider: dto.provider,
-          providerId: dto.providerId,
-        },
-      },
-      update: {
-        name: dto.name,
-        avatarUrl: dto.avatarUrl,
-      },
-      create: {
-        name: dto.name,
-        email: dto.email,
-        avatarUrl: dto.avatarUrl,
-        authProvider: dto.provider,
-        providerId: dto.providerId,
-        role,
-        wallet: role === UserRole.VENDOR ? { create: {} } : undefined,
-        store:
-          role === UserRole.VENDOR
-            ? {
-                create: {
-                  name: `${dto.name}'s Store`,
-                  slug: createSlug(`${dto.name}-${dto.email}`),
-                },
-              }
-            : undefined,
-      },
-    });
-
-    return this.buildAuthResponse(user);
+    void dto;
+    throw new UnauthorizedException(
+      'Social login is disabled until provider tokens are verified server-side',
+    );
   }
 
   async getProfile(userId: string) {

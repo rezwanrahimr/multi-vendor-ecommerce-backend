@@ -60,12 +60,12 @@ export class CategoriesController {
 
   @Get()
   findAll() {
-    return this.categoriesService.findAll();
+    return this.categoriesService.findPublicAll();
   }
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.categoriesService.findOne(id);
+    return this.categoriesService.findPublicOne(id);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -102,6 +102,99 @@ export class CategoriesController {
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
+  @Delete(':id')
+  remove(@Param('id') id: string) {
+    return this.categoriesService.remove(id);
+  }
+}
+
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN)
+@ApiTags('Admin Categories')
+@Controller('admin/categories')
+export class AdminCategoriesController {
+  constructor(private readonly categoriesService: CategoriesService) {}
+
+  @Post()
+  @UseInterceptors(FileInterceptor('image'))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['name'],
+      properties: {
+        name: { type: 'string' },
+        slug: { type: 'string' },
+        description: { type: 'string' },
+        parentId: { type: 'string' },
+        status: { type: 'string', enum: ['ACTIVE', 'INACTIVE'] },
+        image: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  create(
+    @Body() dto: CreateCategoryDto,
+    @UploadedFile(
+      new ParseFilePipeBuilder()
+        .addFileTypeValidator({ fileType: /(jpg|jpeg|png|webp)$/i })
+        .addMaxSizeValidator({ maxSize: 5 * 1024 * 1024 })
+        .build({ fileIsRequired: false }),
+    )
+    image?: { buffer: Buffer; mimetype?: string },
+  ) {
+    return this.categoriesService.create(dto, image);
+  }
+
+  @Get()
+  findAll() {
+    return this.categoriesService.findAll();
+  }
+
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.categoriesService.findOne(id);
+  }
+
+  @Patch(':id')
+  @UseInterceptors(FileInterceptor('image'))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        slug: { type: 'string' },
+        description: { type: 'string' },
+        parentId: { type: 'string' },
+        status: { type: 'string', enum: ['ACTIVE', 'INACTIVE'] },
+        image: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateCategoryDto,
+    @UploadedFile(
+      new ParseFilePipeBuilder()
+        .addFileTypeValidator({ fileType: /(jpg|jpeg|png|webp)$/i })
+        .addMaxSizeValidator({ maxSize: 5 * 1024 * 1024 })
+        .build({ fileIsRequired: false }),
+    )
+    image?: { buffer: Buffer; mimetype?: string },
+  ) {
+    return this.categoriesService.update(id, dto, image);
+  }
+
+  @Patch(':id/activate')
+  activate(@Param('id') id: string) {
+    return this.categoriesService.activate(id);
+  }
+
+  @Patch(':id/deactivate')
+  deactivate(@Param('id') id: string) {
+    return this.categoriesService.deactivate(id);
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.categoriesService.remove(id);

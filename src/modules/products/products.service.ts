@@ -3,7 +3,16 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
-import { Prisma, StockLogType, UserRole } from '@prisma/client';
+import {
+  CategoryStatus,
+  Prisma,
+  ProductStatus,
+  StockLogType,
+  StoreStatus,
+  StoreVerificationStatus,
+  UserRole,
+  UserStatus,
+} from '@prisma/client';
 import { CloudinaryService } from '../../common/services/cloudinary.service';
 import { UploadedImageFile } from '../../common/pipes/images-upload.pipe';
 import { PrismaService } from '../../database/prisma.service';
@@ -30,10 +39,19 @@ export class ProductsService {
     images: UploadedImageFile[],
   ) {
     const slug = dto.slug ?? createSlug(dto.name);
-    const store = await this.resolveWritableStore(userId, role, dto.storeId);
+    const store = await this.resolveWritableStore(
+      userId,
+      role,
+      role === UserRole.ADMIN ? dto.storeId : undefined,
+    );
     const stock = dto.stock ?? 0;
+    const status =
+      role === UserRole.ADMIN
+        ? (dto.status ?? ProductStatus.ACTIVE)
+        : ProductStatus.PENDING_REVIEW;
 
     this.validatePricing(dto.price, dto.discountPrice);
+    await this.assertActiveCategory(dto.categoryId);
     const uploadedImages = await this.uploadProductImages(images);
 
     try {
@@ -52,7 +70,7 @@ export class ProductsService {
             sku: dto.sku,
             images: uploadedImages.map((image) => image.secureUrl),
             imagePublicIds: uploadedImages.map((image) => image.publicId),
-            status: dto.status,
+            status,
           },
         });
 
@@ -85,8 +103,19 @@ export class ProductsService {
   }
 
   async findAll(query: ProductQueryDto) {
+    return this.findAllInternal(query);
+  }
+
+  async findPublicAll(query: ProductQueryDto) {
+    return this.findAllInternal(query, this.publicWhere());
+  }
+
+  private async findAllInternal(
+    query: ProductQueryDto,
+    baseWhere: Prisma.ProductWhereInput = {},
+  ) {
     const pagination = getPagination({ page: query.page, limit: query.limit });
-    const where: Prisma.ProductWhereInput = {
+    const queryWhere: Prisma.ProductWhereInput = {
       status: query.status,
       categoryId: query.categoryId,
       vendorId: query.vendorId,
@@ -97,6 +126,9 @@ export class ProductsService {
             { description: { contains: query.search, mode: 'insensitive' } },
           ]
         : undefined,
+    };
+    const where: Prisma.ProductWhereInput = {
+      AND: [baseWhere, queryWhere],
     };
 
     const [data, total] = await this.prisma.$transaction([
@@ -117,7 +149,7 @@ export class ProductsService {
   }
 
   findForVendor(vendorId: string, query: ProductQueryDto) {
-    return this.findAll({
+    return this.findAllInternal({
       ...query,
       vendorId,
     });
@@ -130,11 +162,39 @@ export class ProductsService {
     });
   }
 
+  findPublicOne(id: string) {
+    return this.prisma.product.findFirstOrThrow({
+      where: {
+        id,
+        ...this.publicWhere(),
+      },
+      include: this.defaultInclude(),
+    });
+  }
+
   findBySlug(slug: string) {
     return this.prisma.product.findUniqueOrThrow({
       where: { slug },
       include: this.defaultInclude(),
     });
+  }
+
+  findPublicBySlug(slug: string) {
+    return this.prisma.product.findFirstOrThrow({
+      where: {
+        slug,
+        ...this.publicWhere(),
+      },
+      include: this.defaultInclude(),
+    });
+  }
+
+  async findVendorOne(id: string, vendorId: string) {
+    const product = await this.findOne(id);
+
+    this.assertCanWriteProduct(product.vendorId, vendorId, UserRole.VENDOR);
+
+    return product;
   }
 
   async update(
@@ -150,6 +210,7 @@ export class ProductsService {
         price: true,
         discountPrice: true,
         stock: true,
+        status: true,
         storeId: true,
         vendorId: true,
         imagePublicIds: true,
@@ -167,6 +228,7 @@ export class ProductsService {
 
     this.assertCanWriteProduct(current.vendorId, changedById, role);
     this.validatePricing(dto.price ?? Number(current.price), nextDiscountPrice);
+    await this.assertActiveCategory(dto.categoryId);
 
     const uploadedImages =
       images.length > 0 ? await this.uploadProductImages(images) : [];
@@ -177,6 +239,7 @@ export class ProductsService {
           where: { id },
           data: {
             ...dto,
+            status: this.resolveUpdateStatus(role, dto, uploadedImages.length > 0),
             slug: dto.slug ?? (dto.name ? createSlug(dto.name) : undefined),
             images:
               uploadedImages.length > 0
@@ -224,26 +287,55 @@ export class ProductsService {
   }
 
   async remove(id: string, userId: string, role: UserRole) {
-    const deletedProduct = await this.prisma.$transaction(async (tx) => {
+    const product = await this.prisma.$transaction(async (tx) => {
       const current = await tx.product.findUniqueOrThrow({
         where: { id },
         select: {
           vendorId: true,
           imagePublicIds: true,
+          _count: {
+            select: { orderItems: true },
+          },
         },
       });
 
       this.assertCanWriteProduct(current.vendorId, userId, role);
 
-      return tx.product.delete({
+      if (current._count.orderItems > 0) {
+        return tx.product.update({
+          where: { id },
+          data: { status: ProductStatus.INACTIVE },
+          include: this.defaultInclude(),
+        });
+      }
+
+      const deletedProduct = await tx.product.delete({
         where: { id },
         include: this.defaultInclude(),
       });
+
+      await this.deleteUploadedImages(current.imagePublicIds);
+
+      return deletedProduct;
     });
 
-    await this.deleteUploadedImages(deletedProduct.imagePublicIds);
+    return product;
+  }
 
-    return deletedProduct;
+  approve(id: string) {
+    return this.updateStatus(id, ProductStatus.ACTIVE);
+  }
+
+  reject(id: string) {
+    return this.updateStatus(id, ProductStatus.REJECTED);
+  }
+
+  activate(id: string) {
+    return this.updateStatus(id, ProductStatus.ACTIVE);
+  }
+
+  deactivate(id: string) {
+    return this.updateStatus(id, ProductStatus.INACTIVE);
   }
 
   private defaultInclude() {
@@ -262,6 +354,7 @@ export class ProductsService {
           slug: true,
           verificationStatus: true,
           commissionRate: true,
+          status: true,
         },
       },
       category: true,
@@ -285,6 +378,8 @@ export class ProductsService {
         select: {
           id: true,
           vendorId: true,
+          status: true,
+          verificationStatus: true,
         },
       });
     }
@@ -293,55 +388,34 @@ export class ProductsService {
       throw new ForbiddenException('Only vendors can create products');
     }
 
-    if (storeId) {
-      const store = await this.prisma.store.findUniqueOrThrow({
-        where: { id: storeId },
-        select: {
-          id: true,
-          vendorId: true,
-        },
-      });
-
-      if (store.vendorId !== userId) {
-        throw new ForbiddenException(
-          'You can only add products to your own store',
-        );
-      }
-
-      return store;
-    }
-
     const existingStore = await this.prisma.store.findUnique({
       where: { vendorId: userId },
       select: {
         id: true,
         vendorId: true,
+        status: true,
+        verificationStatus: true,
+        vendor: {
+          select: {
+            status: true,
+          },
+        },
       },
     });
 
-    if (existingStore) {
-      return existingStore;
+    if (!existingStore) {
+      throw new ForbiddenException('A vendor store is required before adding products');
     }
 
-    const vendor = await this.prisma.user.findUniqueOrThrow({
-      where: { id: userId },
-      select: {
-        id: true,
-        name: true,
-      },
-    });
+    if (
+      existingStore.status !== StoreStatus.ACTIVE ||
+      existingStore.verificationStatus !== StoreVerificationStatus.VERIFIED ||
+      existingStore.vendor.status !== UserStatus.ACTIVE
+    ) {
+      throw new ForbiddenException('Your store must be active and verified before adding products');
+    }
 
-    return this.prisma.store.create({
-      data: {
-        vendorId: vendor.id,
-        name: `${vendor.name}'s Store`,
-        slug: createSlug(`${vendor.name}-${vendor.id.slice(0, 8)}`),
-      },
-      select: {
-        id: true,
-        vendorId: true,
-      },
-    });
+    return existingStore;
   }
 
   private assertCanWriteProduct(
@@ -368,6 +442,86 @@ export class ProductsService {
         'discountPrice must be lower than the product price',
       );
     }
+  }
+
+  private publicWhere(): Prisma.ProductWhereInput {
+    return {
+      status: ProductStatus.ACTIVE,
+      stock: { gt: 0 },
+      store: {
+        status: StoreStatus.ACTIVE,
+        verificationStatus: StoreVerificationStatus.VERIFIED,
+        vendor: {
+          status: UserStatus.ACTIVE,
+        },
+      },
+      OR: [
+        { categoryId: null },
+        {
+          category: {
+            status: CategoryStatus.ACTIVE,
+          },
+        },
+      ],
+    };
+  }
+
+  private async assertActiveCategory(categoryId?: string | null) {
+    if (!categoryId) {
+      return;
+    }
+
+    const category = await this.prisma.category.findUnique({
+      where: { id: categoryId },
+      select: { status: true },
+    });
+
+    if (!category || category.status !== CategoryStatus.ACTIVE) {
+      throw new BadRequestException('Selected category is unavailable');
+    }
+  }
+
+  private resolveUpdateStatus(
+    role: UserRole,
+    dto: UpdateProductDto,
+    hasNewImages: boolean,
+  ) {
+    if (role === UserRole.ADMIN) {
+      return dto.status;
+    }
+
+    const hasReviewableChanges = Boolean(
+      dto.name !== undefined ||
+        dto.description !== undefined ||
+        dto.price !== undefined ||
+        dto.discountPrice !== undefined ||
+        dto.categoryId !== undefined ||
+        hasNewImages,
+    );
+
+    if (hasReviewableChanges) {
+      return ProductStatus.PENDING_REVIEW;
+    }
+
+    const vendorAllowedStatuses: ProductStatus[] = [
+      ProductStatus.DRAFT,
+      ProductStatus.INACTIVE,
+      ProductStatus.OUT_OF_STOCK,
+    ];
+
+    if (dto.status && vendorAllowedStatuses.includes(dto.status)) {
+      return dto.status;
+    }
+
+    return undefined;
+  }
+
+  private updateStatus(id: string, status: ProductStatus) {
+    return this.prisma.product.update({
+      where: { id },
+      data: { status },
+      include: this.defaultInclude(),
+    });
   }
 
   private uploadProductImages(images: UploadedImageFile[]) {

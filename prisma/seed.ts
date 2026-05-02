@@ -1,5 +1,5 @@
 import {
-  DeliveryAreaStatus,
+  CommissionType,
   PrismaClient,
   ProductStatus,
   StoreVerificationStatus,
@@ -81,26 +81,72 @@ async function main() {
 
   await Promise.all(
     [
-      { name: 'Feni Sadar', slug: 'feni-sadar', fee: 60 },
-      { name: 'Chhagalnaiya', slug: 'chhagalnaiya', fee: 90 },
-      { name: 'Daganbhuiyan', slug: 'daganbhuiyan', fee: 90 },
-      { name: 'Parshuram', slug: 'parshuram', fee: 100 },
-      { name: 'Fulgazi', slug: 'fulgazi', fee: 100 },
-      { name: 'Sonagazi', slug: 'sonagazi', fee: 110 },
-    ].map((area) =>
-      prisma.deliveryArea.upsert({
-        where: { slug: area.slug },
+      { name: 'Feni Sadar', slug: 'feni-sadar', baseCharge: 50, sameDayCharge: 80 },
+      { name: 'Daganbhuiyan', slug: 'daganbhuiyan', baseCharge: 80, sameDayCharge: 120 },
+      { name: 'Sonagazi', slug: 'sonagazi', baseCharge: 100, sameDayCharge: 150 },
+      { name: 'Chhagalnaiya', slug: 'chhagalnaiya', baseCharge: 90, sameDayCharge: 130 },
+      { name: 'Parshuram', slug: 'parshuram', baseCharge: 110, sameDayCharge: 160 },
+      { name: 'Fulgazi', slug: 'fulgazi', baseCharge: 100, sameDayCharge: 150 },
+    ].map((zone) =>
+      prisma.deliveryZone.upsert({
+        where: { slug: zone.slug },
         update: {
-          fee: area.fee,
-          status: DeliveryAreaStatus.ACTIVE,
+          baseCharge: zone.baseCharge,
+          sameDayCharge: zone.sameDayCharge,
+          isActive: true,
         },
         create: {
-          ...area,
+          ...zone,
+          district: 'Feni',
+          area: zone.name,
           estimatedDeliveryTime: '1-2 days',
         },
       }),
     ),
   );
+
+  await prisma.setting.upsert({
+    where: { key: 'GLOBAL_COMMISSION_RATE' },
+    update: {
+      value: '10',
+      type: 'number',
+      description: 'Default platform commission percentage.',
+    },
+    create: {
+      key: 'GLOBAL_COMMISSION_RATE',
+      value: '10',
+      type: 'number',
+      description: 'Default platform commission percentage.',
+    },
+  });
+
+  const activeGlobalCommissionRule = await prisma.commissionRule.findFirst({
+    where: {
+      vendorId: null,
+      categoryId: null,
+      productId: null,
+      isActive: true,
+    },
+  });
+
+  if (!activeGlobalCommissionRule) {
+    await prisma.commissionRule.upsert({
+      where: { id: 'global-default-commission' },
+      update: {
+        commissionType: CommissionType.PERCENTAGE,
+        commissionValue: 10,
+        priority: 5,
+        isActive: true,
+      },
+      create: {
+        id: 'global-default-commission',
+        commissionType: CommissionType.PERCENTAGE,
+        commissionValue: 10,
+        priority: 5,
+        isActive: true,
+      },
+    });
+  }
 
   console.log(`Seeded admin ${admin.email} and vendor ${vendor.email}`);
 }

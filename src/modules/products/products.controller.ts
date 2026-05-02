@@ -64,7 +64,14 @@ export class ProductsController {
         sku: { type: 'string' },
         status: {
           type: 'string',
-          enum: ['DRAFT', 'ACTIVE', 'INACTIVE', 'OUT_OF_STOCK'],
+          enum: [
+            'DRAFT',
+            'PENDING_REVIEW',
+            'ACTIVE',
+            'INACTIVE',
+            'REJECTED',
+            'OUT_OF_STOCK',
+          ],
         },
         storeId: { type: 'string', format: 'uuid' },
         categoryId: { type: 'string', format: 'uuid' },
@@ -95,7 +102,7 @@ export class ProductsController {
 
   @Get()
   findAll(@Query() query: ProductQueryDto) {
-    return this.productsService.findAll(query);
+    return this.productsService.findPublicAll(query);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -107,12 +114,12 @@ export class ProductsController {
 
   @Get('slug/:slug')
   findBySlug(@Param('slug') slug: string) {
-    return this.productsService.findBySlug(slug);
+    return this.productsService.findPublicBySlug(slug);
   }
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.productsService.findOne(id);
+    return this.productsService.findPublicOne(id);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -140,7 +147,14 @@ export class ProductsController {
         sku: { type: 'string' },
         status: {
           type: 'string',
-          enum: ['DRAFT', 'ACTIVE', 'INACTIVE', 'OUT_OF_STOCK'],
+          enum: [
+            'DRAFT',
+            'PENDING_REVIEW',
+            'ACTIVE',
+            'INACTIVE',
+            'REJECTED',
+            'OUT_OF_STOCK',
+          ],
         },
         categoryId: { type: 'string', format: 'uuid' },
         images: {
@@ -174,5 +188,119 @@ export class ProductsController {
   @Delete(':id')
   remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.productsService.remove(id, user.id, user.role);
+  }
+}
+
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.VENDOR)
+@ApiTags('Vendor Products')
+@Controller('vendor/products')
+export class VendorProductsController {
+  constructor(private readonly productsService: ProductsService) {}
+
+  @Post()
+  @UseInterceptors(
+    FilesInterceptor('images', PRODUCT_IMAGE_LIMITS.maxFiles, {
+      limits: {
+        files: PRODUCT_IMAGE_LIMITS.maxFiles,
+        fileSize: PRODUCT_IMAGE_LIMITS.maxSizeInBytes,
+      },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  create(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: CreateProductDto,
+    @UploadedFiles(
+      new ImagesUploadPipe({
+        minFiles: 1,
+        maxFiles: PRODUCT_IMAGE_LIMITS.maxFiles,
+        maxSizeInBytes: PRODUCT_IMAGE_LIMITS.maxSizeInBytes,
+        fieldName: 'images',
+      }),
+    )
+    images: UploadedImageFile[],
+  ) {
+    return this.productsService.create(user.id, user.role, dto, images);
+  }
+
+  @Get()
+  findMine(@CurrentUser() user: AuthUser, @Query() query: ProductQueryDto) {
+    return this.productsService.findForVendor(user.id, query);
+  }
+
+  @Get(':id')
+  findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.productsService.findVendorOne(id, user.id);
+  }
+
+  @Patch(':id')
+  @UseInterceptors(
+    FilesInterceptor('images', PRODUCT_IMAGE_LIMITS.maxFiles, {
+      limits: {
+        files: PRODUCT_IMAGE_LIMITS.maxFiles,
+        fileSize: PRODUCT_IMAGE_LIMITS.maxSizeInBytes,
+      },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  update(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateProductDto,
+    @UploadedFiles(
+      new ImagesUploadPipe({
+        minFiles: 0,
+        maxFiles: PRODUCT_IMAGE_LIMITS.maxFiles,
+        maxSizeInBytes: PRODUCT_IMAGE_LIMITS.maxSizeInBytes,
+        fieldName: 'images',
+      }),
+    )
+    images: UploadedImageFile[],
+  ) {
+    return this.productsService.update(id, dto, user.id, user.role, images);
+  }
+
+  @Delete(':id')
+  remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.productsService.remove(id, user.id, user.role);
+  }
+}
+
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN)
+@ApiTags('Admin Products')
+@Controller('admin/products')
+export class AdminProductsController {
+  constructor(private readonly productsService: ProductsService) {}
+
+  @Get()
+  findAll(@Query() query: ProductQueryDto) {
+    return this.productsService.findAll(query);
+  }
+
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.productsService.findOne(id);
+  }
+
+  @Patch(':id/approve')
+  approve(@Param('id') id: string) {
+    return this.productsService.approve(id);
+  }
+
+  @Patch(':id/reject')
+  reject(@Param('id') id: string) {
+    return this.productsService.reject(id);
+  }
+
+  @Patch(':id/activate')
+  activate(@Param('id') id: string) {
+    return this.productsService.activate(id);
+  }
+
+  @Patch(':id/deactivate')
+  deactivate(@Param('id') id: string) {
+    return this.productsService.deactivate(id);
   }
 }

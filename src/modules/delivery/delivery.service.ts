@@ -19,7 +19,9 @@ export class DeliveryService {
           in: [
             OrderStatus.CONFIRMED,
             OrderStatus.PROCESSING,
-            OrderStatus.SHIPPED,
+            OrderStatus.READY_FOR_PICKUP,
+            OrderStatus.ASSIGNED_TO_DELIVERY,
+            OrderStatus.OUT_FOR_DELIVERY,
           ],
         },
       },

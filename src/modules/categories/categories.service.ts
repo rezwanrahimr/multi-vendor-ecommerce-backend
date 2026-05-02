@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { CategoryStatus } from '@prisma/client';
 import { CloudinaryService } from '../../common/services/cloudinary.service';
 import { PrismaService } from '../../database/prisma.service';
 import { createSlug } from '../../utils/slug.util';
@@ -55,12 +56,42 @@ export class CategoriesService {
     });
   }
 
+  findPublicAll() {
+    return this.prisma.category.findMany({
+      where: { status: CategoryStatus.ACTIVE },
+      orderBy: { name: 'asc' },
+      include: {
+        children: {
+          where: { status: CategoryStatus.ACTIVE },
+        },
+        _count: {
+          select: { products: true },
+        },
+      },
+    });
+  }
+
   findOne(id: string) {
     return this.prisma.category.findUniqueOrThrow({
       where: { id },
       include: {
         parent: true,
         children: true,
+      },
+    });
+  }
+
+  findPublicOne(id: string) {
+    return this.prisma.category.findFirstOrThrow({
+      where: {
+        id,
+        status: CategoryStatus.ACTIVE,
+      },
+      include: {
+        parent: true,
+        children: {
+          where: { status: CategoryStatus.ACTIVE },
+        },
       },
     });
   }
@@ -103,6 +134,22 @@ export class CategoriesService {
   }
 
   async remove(id: string) {
+    const currentCategory = await this.prisma.category.findUniqueOrThrow({
+      where: { id },
+      include: {
+        _count: {
+          select: { products: true },
+        },
+      },
+    });
+
+    if (currentCategory._count.products > 0) {
+      return this.prisma.category.update({
+        where: { id },
+        data: { status: CategoryStatus.INACTIVE },
+      });
+    }
+
     const deletedCategory = await this.prisma.category.delete({
       where: { id },
     });
@@ -112,5 +159,19 @@ export class CategoriesService {
     }
 
     return deletedCategory;
+  }
+
+  activate(id: string) {
+    return this.prisma.category.update({
+      where: { id },
+      data: { status: CategoryStatus.ACTIVE },
+    });
+  }
+
+  deactivate(id: string) {
+    return this.prisma.category.update({
+      where: { id },
+      data: { status: CategoryStatus.INACTIVE },
+    });
   }
 }

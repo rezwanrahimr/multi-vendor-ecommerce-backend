@@ -1,16 +1,12 @@
-import { PaymentStatus } from '@prisma/client';
+import { PaymentMethod, PaymentStatus } from '@prisma/client';
 import { IsEnum, IsNumber, IsObject, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreatePaymentDto {
   @IsString()
   orderId: string;
 
-  @IsString()
-  method: string;
-
-  @IsOptional()
-  @IsString()
-  provider?: string;
+  @IsEnum(PaymentMethod)
+  paymentMethod: PaymentMethod;
 
   @IsOptional()
   @IsString()
@@ -22,7 +18,23 @@ export class CreatePaymentDto {
 
   @IsOptional()
   @IsEnum(PaymentStatus)
-  status?: PaymentStatus;
+  paymentStatus?: PaymentStatus;
+
+  @IsOptional()
+  @IsString()
+  senderPhone?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentScreenshotUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentScreenshotPublicId?: string;
+
+  @IsOptional()
+  @IsString()
+  rejectionReason?: string;
 
   @IsOptional()
   @IsObject()
