@@ -157,3 +157,13 @@ Expected:
 - Confirm Swagger is reachable at `/api/docs` only where you want it exposed.
 - Configure logs and error monitoring.
 - Schedule database backups.
+
+## 7. Phase 16 Rehearsal Notes
+
+Keep the latest staging rehearsal record in:
+
+```text
+docs/phase16-staging-rehearsal.md
+```
+
+Do not apply `20260502193000_coupons_notifications_audit_reviews` to staging until the Neon backup timestamp is recorded there.
