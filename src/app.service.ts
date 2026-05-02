@@ -13,7 +13,7 @@ export class AppService {
     const database = await this.getDatabaseStatus();
 
     return {
-      status: database === 'connected' ? 'ok' : 'degraded',
+      status: database === 'ok' ? 'ok' : 'degraded',
       service: this.configService.get<string>('app.name', 'HelloFeni API'),
       environment: this.configService.get<string>('app.nodeEnv', 'development'),
       database,
@@ -215,7 +215,7 @@ export class AppService {
   private async getDatabaseStatus() {
     try {
       await this.prisma.$queryRaw`SELECT 1`;
-      return 'connected';
+      return 'ok';
     } catch {
       return 'unreachable';
     }

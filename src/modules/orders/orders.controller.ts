@@ -15,6 +15,8 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { AuthUser } from '../../common/types/auth-user.type';
+import { PaymentsService } from '../payments/payments.service';
+import { WalletsService } from '../wallets/wallets.service';
 import { AssignDeliveryManDto } from './dto/assign-delivery-man.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -32,33 +34,90 @@ export class OrdersController {
     return this.ordersService.create(user.id, dto);
   }
 
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.CUSTOMER)
+  @Get()
+  findMyOrders(@CurrentUser() user: AuthUser) {
+    return this.ordersService.findCustomerOrders(user.id);
+  }
+
+  @Roles(UserRole.CUSTOMER)
+  @Get(':id')
+  findMyOrder(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.ordersService.findCustomerOrder(user.id, id);
+  }
+
+  @Roles(UserRole.CUSTOMER)
+  @Patch(':id/cancel')
+  cancel(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.ordersService.cancelCustomerOrder(user.id, id);
+  }
+}
+
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.VENDOR)
+@ApiTags('Vendor Orders')
+@Controller('vendor/orders')
+export class VendorOrdersController {
+  constructor(private readonly ordersService: OrdersService) {}
+
+  @Get()
+  findMine(@CurrentUser() user: AuthUser) {
+    return this.ordersService.findVendorOrders(user.id);
+  }
+
+  @Get(':id')
+  findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.ordersService.findVendorOrder(user.id, id);
+  }
+
+  @Patch(':id/status')
+  updateStatus(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateOrderStatusDto,
+  ) {
+    return this.ordersService.updateVendorStatus(user.id, id, dto);
+  }
+}
+
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN)
+@ApiTags('Admin Orders')
+@Controller('admin/orders')
+export class AdminOrdersController {
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly paymentsService: PaymentsService,
+    private readonly walletsService: WalletsService,
+  ) {}
+
   @Get()
   findAll(@Query('page') page?: number, @Query('limit') limit?: number) {
     return this.ordersService.findAll(page, limit);
   }
 
-  @Roles(UserRole.CUSTOMER)
-  @Get('my')
-  findMyOrders(@CurrentUser() user: AuthUser) {
-    return this.ordersService.findCustomerOrders(user.id);
-  }
-
-  @Roles(UserRole.ADMIN, UserRole.VENDOR, UserRole.DELIVERY_MAN)
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.ordersService.findOne(id);
   }
 
-  @Roles(UserRole.ADMIN, UserRole.VENDOR)
   @Patch(':id/status')
   updateStatus(@Param('id') id: string, @Body() dto: UpdateOrderStatusDto) {
     return this.ordersService.updateStatus(id, dto);
   }
 
-  @Roles(UserRole.ADMIN)
   @Patch(':id/assign-delivery')
   assignDeliveryMan(@Param('id') id: string, @Body() dto: AssignDeliveryManDto) {
     return this.ordersService.assignDeliveryMan(id, dto);
+  }
+
+  @Patch(':id/verify-cod-payment')
+  verifyCodPayment(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.paymentsService.verifyCodByOrder(id, user.id);
+  }
+
+  @Post(':id/settle-wallet')
+  settleWallet(@Param('id') id: string) {
+    return this.walletsService.settleOrderVendorEarnings(id);
   }
 }

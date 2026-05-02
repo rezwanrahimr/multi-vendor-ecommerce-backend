@@ -111,6 +111,11 @@ enum WalletTransactionType {
   CREDIT
   DEBIT
   WITHDRAWAL
+  ORDER_EARNING
+  PAYOUT_REQUEST
+  PAYOUT_PAID
+  PAYOUT_REJECTED
+  ADJUSTMENT
 }
 
 enum WithdrawalStatus {
@@ -137,6 +142,9 @@ model User {
   customerOrders Order[]    @relation("CustomerOrders")
   deliveryOrders Order[]    @relation("DeliveryOrders")
   reviewedPayments Payment[] @relation("PaymentReviewedBy")
+  customerPayments Payment[] @relation("PaymentCustomer")
+  cashCollectedPayments Payment[] @relation("PaymentCashCollectedBy")
+  approvedWithdrawals WithdrawalRequest[] @relation("WithdrawalApprovedBy")
   commissionRules CommissionRule[]
   stockLogs      StockLog[] @relation("StockLogChangedBy")
   reviews        Review[]
@@ -336,12 +344,15 @@ model Order {
   deliveryStatus  DeliveryStatus @default(NOT_ASSIGNED)
   paymentMethod   PaymentMethod  @default(COD)
   paymentStatus   PaymentStatus  @default(UNPAID)
+  deliveryType     String         @default("NORMAL")
   subtotal        Decimal       @db.Decimal(10, 2)
   deliveryCharge  Decimal       @default(0) @db.Decimal(10, 2)
   discountAmount  Decimal       @default(0) @db.Decimal(10, 2)
   total           Decimal       @db.Decimal(10, 2)
   shippingAddress Json
   customerNote    String?
+  deliveryNote    String?
+  failedReason    String?
   vendorSettledAt DateTime?
 
   customer     User          @relation("CustomerOrders", fields: [customerId], references: [id], onDelete: Restrict)
@@ -368,12 +379,15 @@ model OrderItem {
   productId       String
   vendorId        String
   storeId         String
+  productName     String?
   quantity        Int
   unitPrice       Decimal        @db.Decimal(10, 2)
   priceSnapshot   Decimal        @db.Decimal(10, 2)
   totalPrice      Decimal        @db.Decimal(10, 2)
   subtotal        Decimal        @db.Decimal(10, 2)
   commissionType  CommissionType @default(PERCENTAGE)
+  commissionRuleId String?
+  commissionSource String?
   commissionValue Decimal        @default(0) @db.Decimal(10, 2)
   adminCommission Decimal        @default(0) @db.Decimal(10, 2)
   commissionAmount Decimal       @default(0) @db.Decimal(10, 2)
@@ -415,6 +429,7 @@ model Review {
 model Payment {
   id                        String        @id @default(uuid())
   orderId                   String        @unique
+  customerId                String?
   paymentMethod             PaymentMethod
   paymentStatus             PaymentStatus @default(UNPAID)
   transactionId             String?       @unique
@@ -423,11 +438,17 @@ model Payment {
   paymentScreenshotPublicId String?
   amount                    Decimal       @db.Decimal(10, 2)
   metadata                  Json?
+  cashCollectedAmount       Decimal?      @db.Decimal(10, 2)
+  cashCollectedById         String?
+  cashCollectedAt           DateTime?
+  cashCollectionNote        String?
   reviewedById              String?
   reviewedAt                DateTime?
   rejectionReason           String?
 
   order      Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customer   User? @relation("PaymentCustomer", fields: [customerId], references: [id], onDelete: SetNull)
+  cashCollectedBy User? @relation("PaymentCashCollectedBy", fields: [cashCollectedById], references: [id], onDelete: SetNull)
   reviewedBy User? @relation("PaymentReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
@@ -435,6 +456,8 @@ model Payment {
 
   @@index([paymentMethod])
   @@index([paymentStatus])
+  @@index([customerId])
+  @@index([cashCollectedById])
   @@index([reviewedById])
 }
 
@@ -480,6 +503,8 @@ model Wallet {
   vendorId       String  @unique
   balance        Decimal @default(0) @db.Decimal(10, 2)
   pendingBalance Decimal @default(0) @db.Decimal(10, 2)
+  totalEarned    Decimal @default(0) @db.Decimal(10, 2)
+  totalWithdrawn Decimal @default(0) @db.Decimal(10, 2)
 
   vendor       User                @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   transactions WalletTransaction[]
@@ -490,20 +515,29 @@ model Wallet {
 }
 
 model WalletTransaction {
-  id        String                @id @default(uuid())
-  walletId  String
-  type      WalletTransactionType
-  amount    Decimal               @db.Decimal(10, 2)
-  reference String?
-  reason    String?
-  metadata  Json?
+  id                  String                @id @default(uuid())
+  walletId            String
+  orderId             String?
+  withdrawalRequestId String?
+  type                WalletTransactionType
+  amount              Decimal               @db.Decimal(10, 2)
+  balanceBefore       Decimal               @default(0) @db.Decimal(10, 2)
+  balanceAfter        Decimal               @default(0) @db.Decimal(10, 2)
+  reference           String?
+  reason              String?
+  note                String?
+  metadata            Json?
 
   wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
 
   @@unique([walletId, type, reference])
+  @@unique([walletId, type, orderId])
+  @@unique([walletId, type, withdrawalRequestId])
   @@index([walletId])
+  @@index([orderId])
+  @@index([withdrawalRequestId])
   @@index([type])
 }
 
@@ -514,13 +548,20 @@ model WithdrawalRequest {
   status        WithdrawalStatus @default(PENDING)
   paymentMethod String
   accountNumber String
+  accountName   String?
   note          String?
+  adminNote     String?
+  approvedById  String?
+  paidAt        DateTime?
+  payoutTransactionId String?
 
   wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  approvedBy User? @relation("WithdrawalApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([walletId])
   @@index([status])
+  @@index([approvedById])
 }

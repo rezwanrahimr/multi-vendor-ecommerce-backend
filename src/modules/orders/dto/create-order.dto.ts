@@ -1,19 +1,21 @@
 import {
+  ArrayMinSize,
   IsArray,
   IsInt,
-  IsNumber,
+  IsEnum,
   IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaymentMethod } from '@prisma/client';
-import { IsEnum } from 'class-validator';
+import { DeliveryType } from '../../delivery-zones/dto/calculate-delivery-charge.dto';
 
 export class CreateOrderItemDto {
-  @IsString()
+  @IsUUID()
   productId: string;
 
   @IsInt()
@@ -22,40 +24,25 @@ export class CreateOrderItemDto {
 }
 
 export class CreateOrderDto {
+  @IsOptional()
   @IsArray()
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => CreateOrderItemDto)
-  items: CreateOrderItemDto[];
+  items?: CreateOrderItemDto[];
 
   @IsObject()
   shippingAddress: Record<string, unknown>;
 
-  @IsOptional()
-  @IsString()
-  deliveryZoneId?: string;
+  @IsUUID()
+  deliveryZoneId: string;
 
   @IsOptional()
-  @IsString()
-  deliveryAreaId?: string;
+  @IsEnum(DeliveryType)
+  deliveryType?: DeliveryType;
 
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  deliveryCharge?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  deliveryFee?: number;
-
-  @IsOptional()
   @IsEnum(PaymentMethod)
-  paymentMethod?: PaymentMethod;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  discountAmount?: number;
+  paymentMethod: PaymentMethod;
 
   @IsOptional()
   @IsString()

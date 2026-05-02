@@ -13,10 +13,22 @@ export class PrismaExceptionFilter implements ExceptionFilter {
     response.status(statusCode).json({
       success: false,
       statusCode,
+      message,
+      error: this.getError(statusCode),
       timestamp: new Date().toISOString(),
       path: request.url,
-      message,
     });
+  }
+
+  private getError(statusCode: number) {
+    switch (statusCode) {
+      case HttpStatus.CONFLICT:
+        return 'Conflict';
+      case HttpStatus.NOT_FOUND:
+        return 'Not Found';
+      default:
+        return 'Bad Request';
+    }
   }
 
   private mapPrismaError(exception: Prisma.PrismaClientKnownRequestError) {

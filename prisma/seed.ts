@@ -10,32 +10,30 @@ import * as bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 
 async function main() {
-  const passwordHash = await bcrypt.hash('Password123!', 12);
+  const isProduction = process.env.NODE_ENV === 'production';
+  const seededAccounts: string[] = [];
+  const adminEmail =
+    process.env.SEED_ADMIN_EMAIL ?? (isProduction ? undefined : 'admin@hellofeni.com');
+  const adminPassword =
+    process.env.SEED_ADMIN_PASSWORD ?? (isProduction ? undefined : 'Password123!');
 
-  const admin = await prisma.user.upsert({
-    where: { email: 'admin@hellofeni.com' },
-    update: {},
-    create: {
-      name: 'HelloFeni Admin',
-      email: 'admin@hellofeni.com',
-      passwordHash,
-      role: UserRole.ADMIN,
-    },
-  });
-
-  const vendor = await prisma.user.upsert({
-    where: { email: 'vendor@hellofeni.com' },
-    update: {},
-    create: {
-      name: 'Demo Vendor',
-      email: 'vendor@hellofeni.com',
-      passwordHash,
-      role: UserRole.VENDOR,
-      wallet: {
-        create: {},
+  if (adminEmail && adminPassword) {
+    const passwordHash = await bcrypt.hash(adminPassword, 12);
+    const admin = await prisma.user.upsert({
+      where: { email: adminEmail },
+      update: {},
+      create: {
+        name: process.env.SEED_ADMIN_NAME ?? 'HelloFeni Admin',
+        email: adminEmail,
+        passwordHash,
+        role: UserRole.ADMIN,
       },
-    },
-  });
+    });
+
+    seededAccounts.push(admin.email);
+  } else {
+    console.log('Skipped admin seed because SEED_ADMIN_EMAIL/SEED_ADMIN_PASSWORD are not set.');
+  }
 
   const category = await prisma.category.upsert({
     where: { slug: 'groceries' },
@@ -47,37 +45,59 @@ async function main() {
     },
   });
 
-  const store = await prisma.store.upsert({
-    where: { vendorId: vendor.id },
-    update: {},
-    create: {
-      vendorId: vendor.id,
-      name: 'Demo Vendor Store',
-      slug: 'demo-vendor-store',
-      verificationStatus: StoreVerificationStatus.VERIFIED,
-      commissionRate: 10,
-    },
-  });
+  if (!isProduction) {
+    const demoPasswordHash = await bcrypt.hash(
+      process.env.SEED_DEMO_PASSWORD ?? 'Password123!',
+      12,
+    );
+    const vendor = await prisma.user.upsert({
+      where: { email: 'vendor@hellofeni.com' },
+      update: {},
+      create: {
+        name: 'Demo Vendor',
+        email: 'vendor@hellofeni.com',
+        passwordHash: demoPasswordHash,
+        role: UserRole.VENDOR,
+        wallet: {
+          create: {},
+        },
+      },
+    });
 
-  await prisma.product.upsert({
-    where: { slug: 'premium-rice-5kg' },
-    update: {
-      vendorId: vendor.id,
-      storeId: store.id,
-    },
-    create: {
-      name: 'Premium Rice 5kg',
-      slug: 'premium-rice-5kg',
-      description: 'Quality rice from a verified HelloFeni vendor.',
-      price: 620,
-      stock: 50,
-      status: ProductStatus.ACTIVE,
-      vendorId: vendor.id,
-      storeId: store.id,
-      categoryId: category.id,
-      images: [],
-    },
-  });
+    const store = await prisma.store.upsert({
+      where: { vendorId: vendor.id },
+      update: {},
+      create: {
+        vendorId: vendor.id,
+        name: 'Demo Vendor Store',
+        slug: 'demo-vendor-store',
+        verificationStatus: StoreVerificationStatus.VERIFIED,
+        commissionRate: 10,
+      },
+    });
+
+    await prisma.product.upsert({
+      where: { slug: 'premium-rice-5kg' },
+      update: {
+        vendorId: vendor.id,
+        storeId: store.id,
+      },
+      create: {
+        name: 'Premium Rice 5kg',
+        slug: 'premium-rice-5kg',
+        description: 'Quality rice from a verified HelloFeni vendor.',
+        price: 620,
+        stock: 50,
+        status: ProductStatus.ACTIVE,
+        vendorId: vendor.id,
+        storeId: store.id,
+        categoryId: category.id,
+        images: [],
+      },
+    });
+
+    seededAccounts.push(vendor.email);
+  }
 
   await Promise.all(
     [
@@ -148,7 +168,11 @@ async function main() {
     });
   }
 
-  console.log(`Seeded admin ${admin.email} and vendor ${vendor.email}`);
+  console.log(
+    `Seeded HelloFeni baseline data${
+      seededAccounts.length ? ` and accounts: ${seededAccounts.join(', ')}` : ''
+    }`,
+  );
 }
 
 main()
