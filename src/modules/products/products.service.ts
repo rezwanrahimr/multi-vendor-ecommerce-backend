@@ -452,7 +452,7 @@ export class ProductsService {
   private publicWhere(): Prisma.ProductWhereInput {
     return {
       status: ProductStatus.ACTIVE,
-      stock: { gt: 0 },
+      // stock: { gt: 0 },
       store: {
         status: StoreStatus.ACTIVE,
         verificationStatus: StoreVerificationStatus.VERIFIED,
