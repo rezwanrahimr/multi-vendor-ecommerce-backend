@@ -1,4 +1,3 @@
-import { UserRole } from '@prisma/client';
 import {
   IsEmail,
   IsIn,
@@ -7,6 +6,9 @@ import {
   IsString,
   MinLength,
 } from 'class-validator';
+
+const REGISTER_ROLES = ['CUSTOMER', 'VENDOR'] as const;
+type RegisterRole = (typeof REGISTER_ROLES)[number];
 
 export class RegisterDto {
   @IsString()
@@ -24,8 +26,8 @@ export class RegisterDto {
   password: string;
 
   @IsOptional()
-  @IsIn([UserRole.CUSTOMER, UserRole.VENDOR])
-  role?: UserRole;
+  @IsIn(REGISTER_ROLES)
+  role?: RegisterRole;
 
   @IsOptional()
   @IsString()
