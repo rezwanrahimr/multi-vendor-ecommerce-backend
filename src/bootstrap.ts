@@ -54,7 +54,7 @@ export function configureApp(app: NestExpressApplication) {
     .build();
 
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig, {
-    deepScanRoutes: true,
+    deepScanRoutes: false,
   });
 
   SwaggerModule.setup('api/docs', app, swaggerDocument, {
