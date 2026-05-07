@@ -36,7 +36,7 @@ const PRODUCT_IMAGE_LIMITS = {
 @ApiTags('Products')
 @Controller('products')
 export class ProductsController {
-  constructor(private readonly productsService: ProductsService) {}
+  constructor(private readonly productsService: ProductsService) { }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.VENDOR)
@@ -122,6 +122,12 @@ export class ProductsController {
     return this.productsService.findPublicOne(id);
   }
 
+  @Get('vendor/:id')
+  findOneForVendor(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.productsService.findProductVendorOne(id, user.id);
+  }
+
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN, UserRole.VENDOR)
   @Patch(':id')
@@ -196,7 +202,7 @@ export class ProductsController {
 @ApiTags('Vendor Products')
 @Controller('vendor/products')
 export class VendorProductsController {
-  constructor(private readonly productsService: ProductsService) {}
+  constructor(private readonly productsService: ProductsService) { }
 
   @Post()
   @UseInterceptors(
@@ -272,7 +278,7 @@ export class VendorProductsController {
 @ApiTags('Admin Products')
 @Controller('admin/products')
 export class AdminProductsController {
-  constructor(private readonly productsService: ProductsService) {}
+  constructor(private readonly productsService: ProductsService) { }
 
   @Get()
   findAll(@Query() query: ProductQueryDto) {

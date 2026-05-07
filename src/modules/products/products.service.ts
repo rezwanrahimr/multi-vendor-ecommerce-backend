@@ -35,7 +35,7 @@ export class ProductsService {
     private readonly cloudinaryService: CloudinaryService,
     private readonly notificationsService: NotificationsService,
     private readonly auditLogsService: AuditLogsService,
-  ) {}
+  ) { }
 
   async create(
     userId: string,
@@ -127,9 +127,9 @@ export class ProductsService {
       storeId: query.storeId,
       OR: query.search
         ? [
-            { name: { contains: query.search, mode: 'insensitive' } },
-            { description: { contains: query.search, mode: 'insensitive' } },
-          ]
+          { name: { contains: query.search, mode: 'insensitive' } },
+          { description: { contains: query.search, mode: 'insensitive' } },
+        ]
         : undefined,
     };
     const where: Prisma.ProductWhereInput = {
@@ -172,6 +172,16 @@ export class ProductsService {
       where: {
         id,
         ...this.publicWhere(),
+      },
+      include: this.defaultInclude(),
+    });
+  }
+
+  findProductVendorOne(id: string, vendorId: string) {
+    return this.prisma.product.findFirstOrThrow({
+      where: {
+        id,
+        vendorId,
       },
       include: this.defaultInclude(),
     });
@@ -452,7 +462,26 @@ export class ProductsService {
   private publicWhere(): Prisma.ProductWhereInput {
     return {
       status: ProductStatus.ACTIVE,
-      // stock: { gt: 0 },
+      store: {
+        status: StoreStatus.ACTIVE,
+        verificationStatus: StoreVerificationStatus.VERIFIED,
+        vendor: {
+          status: UserStatus.ACTIVE,
+        },
+      },
+      OR: [
+        { categoryId: null },
+        {
+          category: {
+            status: CategoryStatus.ACTIVE,
+          },
+        },
+      ],
+    };
+  }
+
+  private vendorProductWhere(): Prisma.ProductWhereInput {
+    return {
       store: {
         status: StoreStatus.ACTIVE,
         verificationStatus: StoreVerificationStatus.VERIFIED,
@@ -497,11 +526,11 @@ export class ProductsService {
 
     const hasReviewableChanges = Boolean(
       dto.name !== undefined ||
-        dto.description !== undefined ||
-        dto.price !== undefined ||
-        dto.discountPrice !== undefined ||
-        dto.categoryId !== undefined ||
-        hasNewImages,
+      dto.description !== undefined ||
+      dto.price !== undefined ||
+      dto.discountPrice !== undefined ||
+      dto.categoryId !== undefined ||
+      hasNewImages,
     );
 
     if (hasReviewableChanges) {
