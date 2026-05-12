@@ -12,7 +12,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -199,6 +199,7 @@ export class ProductsController {
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.VENDOR)
+@ApiBearerAuth('jwt')
 @ApiTags('Vendor Products')
 @Controller('vendor/products')
 export class VendorProductsController {
@@ -275,6 +276,7 @@ export class VendorProductsController {
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.ADMIN)
+@ApiBearerAuth('jwt')
 @ApiTags('Admin Products')
 @Controller('admin/products')
 export class AdminProductsController {

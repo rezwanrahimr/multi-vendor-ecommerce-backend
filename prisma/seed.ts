@@ -97,6 +97,25 @@ async function main() {
     });
 
     seededAccounts.push(vendor.email);
+
+    const deliveryManEmail =
+      process.env.SEED_DELIVERY_MAN_EMAIL ?? 'delivery@hellofeni.com';
+    const deliveryManPasswordHash = await bcrypt.hash(
+      process.env.SEED_DELIVERY_MAN_PASSWORD ?? 'Password123!',
+      12,
+    );
+    const deliveryMan = await prisma.user.upsert({
+      where: { email: deliveryManEmail },
+      update: {},
+      create: {
+        name: process.env.SEED_DELIVERY_MAN_NAME ?? 'Demo Delivery Man',
+        email: deliveryManEmail,
+        passwordHash: deliveryManPasswordHash,
+        role: UserRole.DELIVERY_MAN,
+      },
+    });
+
+    seededAccounts.push(deliveryMan.email);
   }
 
   await Promise.all(

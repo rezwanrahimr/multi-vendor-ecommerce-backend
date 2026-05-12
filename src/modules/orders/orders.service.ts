@@ -341,6 +341,11 @@ export class OrdersService {
     status: OrderStatus,
   ) {
     return this.prisma.$transaction(async (tx) => {
+      const debug = (msg: string) => {
+        if (process.env.DEBUG_TX === 'true') console.log(msg);
+      };
+
+      debug(`tx:start:updateAssigned:${orderId}`);
       const order = await tx.order.findFirst({
         where: {
           id: orderId,
@@ -349,17 +354,23 @@ export class OrdersService {
         include: this.defaultInclude(),
       });
 
+      debug(`tx:after:findAssigned:${orderId}`);
+
       if (!order) {
         throw new NotFoundException('Assigned order was not found');
       }
 
       this.assertTransition(order.status, status, UserRole.DELIVERY_MAN);
 
-      return tx.order.update({
+      const updated = await tx.order.update({
         where: { id: orderId },
         data: { status },
         include: this.defaultInclude(),
       });
+
+      debug(`tx:after:updateAssigned:${orderId}`);
+
+      return updated;
     });
   }
 
@@ -378,10 +389,18 @@ export class OrdersService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      const debug = (msg: string) => {
+        if (process.env.DEBUG_TX === 'true') console.log(msg);
+      };
+
+      debug(`tx:start:assignDelivery:${id}`);
+
       const order = await tx.order.findUniqueOrThrow({
         where: { id },
         select: { status: true, customerId: true, orderNumber: true },
       });
+
+      debug(`tx:after:findAssign:${id}`);
 
       if (order.status !== OrderStatus.READY_FOR_PICKUP) {
         throw new BadRequestException(
@@ -399,6 +418,9 @@ export class OrdersService {
         include: this.defaultInclude(),
       });
 
+      debug(`tx:after:updateAssign:${id}`);
+
+      debug(`tx:before:notifyDelivery:${id}`);
       await this.notificationsService.create(
         {
           userId: dto.deliveryManId,
@@ -409,7 +431,9 @@ export class OrdersService {
         },
         tx,
       );
+      debug(`tx:after:notifyDelivery:${id}`);
 
+      debug(`tx:before:notifyCustomer:${id}`);
       await this.notificationsService.create(
         {
           userId: order.customerId,
@@ -420,7 +444,10 @@ export class OrdersService {
         },
         tx,
       );
+      debug(`tx:after:notifyCustomer:${id}`);
 
+
+      debug(`tx:before:auditAssign:${id}`);
       await this.auditLogsService.log(
         {
           actorId,
@@ -431,6 +458,7 @@ export class OrdersService {
         },
         tx,
       );
+      debug(`tx:after:auditAssign:${id}`);
 
       return updatedOrder;
     });
