@@ -24,9 +24,40 @@ import {
   getPagination,
 } from '../../utils/pagination.util';
 import { createSlug } from '../../utils/slug.util';
+import {
+  AdminProductBulkAction,
+  AdminProductBulkActionDto,
+} from './dto/admin-product-bulk-action.dto';
 import { CreateProductDto } from './dto/create-product.dto';
-import { ProductQueryDto } from './dto/product-query.dto';
+import { ProductQueryDto, ProductStockStatus } from './dto/product-query.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+
+const ADMIN_PRODUCT_LOW_STOCK_THRESHOLD = 20;
+
+const productInclude = {
+  vendor: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+    },
+  },
+  store: {
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      verificationStatus: true,
+      commissionRate: true,
+      status: true,
+    },
+  },
+  category: true,
+} as const;
+
+type ProductRecord = Prisma.ProductGetPayload<{
+  include: typeof productInclude;
+}>;
 
 @Injectable()
 export class ProductsService {
@@ -108,7 +139,12 @@ export class ProductsService {
   }
 
   async findAll(query: ProductQueryDto) {
-    return this.findAllInternal(query);
+    const result = await this.findAllInternal(query);
+
+    return {
+      ...result,
+      data: result.data.map((product) => this.toAdminProduct(product)),
+    };
   }
 
   async findPublicAll(query: ProductQueryDto) {
@@ -120,18 +156,7 @@ export class ProductsService {
     baseWhere: Prisma.ProductWhereInput = {},
   ) {
     const pagination = getPagination({ page: query.page, limit: query.limit });
-    const queryWhere: Prisma.ProductWhereInput = {
-      status: query.status,
-      categoryId: query.categoryId,
-      vendorId: query.vendorId,
-      storeId: query.storeId,
-      OR: query.search
-        ? [
-          { name: { contains: query.search, mode: 'insensitive' } },
-          { description: { contains: query.search, mode: 'insensitive' } },
-        ]
-        : undefined,
-    };
+    const queryWhere = this.buildProductWhere(query);
     const where: Prisma.ProductWhereInput = {
       AND: [baseWhere, queryWhere],
     };
@@ -141,7 +166,7 @@ export class ProductsService {
         where,
         skip: pagination.skip,
         take: pagination.take,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { updatedAt: 'desc' },
         include: this.defaultInclude(),
       }),
       this.prisma.product.count({ where }),
@@ -161,10 +186,100 @@ export class ProductsService {
   }
 
   findOne(id: string) {
-    return this.prisma.product.findUniqueOrThrow({
-      where: { id },
+    return this.prisma.product
+      .findUniqueOrThrow({
+        where: { id },
+        include: this.defaultInclude(),
+      })
+      .then((product) => this.toAdminProduct(product));
+  }
+
+  async findAdminSummary(query: ProductQueryDto) {
+    const baseWhere = this.buildSummaryWhere(query);
+    const [totalProducts, activeProducts, pendingReview, lowStock, outOfStock] =
+      await this.prisma.$transaction([
+        this.prisma.product.count({ where: baseWhere }),
+        this.prisma.product.count({
+          where: {
+            AND: [baseWhere, { status: ProductStatus.ACTIVE }],
+          },
+        }),
+        this.prisma.product.count({
+          where: {
+            AND: [baseWhere, { status: ProductStatus.PENDING_REVIEW }],
+          },
+        }),
+        this.prisma.product.count({
+          where: {
+            AND: [baseWhere, this.stockStateWhere(ProductStockStatus.LOW_STOCK)],
+          },
+        }),
+        this.prisma.product.count({
+          where: {
+            AND: [baseWhere, this.stockStateWhere(ProductStockStatus.OUT_OF_STOCK)],
+          },
+        }),
+      ]);
+
+    return {
+      totalProducts,
+      activeProducts,
+      pendingReview,
+      lowStock,
+      outOfStock,
+      lowStockThreshold: ADMIN_PRODUCT_LOW_STOCK_THRESHOLD,
+    };
+  }
+
+  async exportAdminProducts(query: ProductQueryDto) {
+    const where = this.buildProductWhere(query);
+    const products = await this.prisma.product.findMany({
+      where,
+      orderBy: { updatedAt: 'desc' },
       include: this.defaultInclude(),
     });
+    const headers = [
+      'id',
+      'name',
+      'sku',
+      'vendor',
+      'store',
+      'category',
+      'price',
+      'discountPrice',
+      'stock',
+      'stockStatus',
+      'status',
+      'managementStatus',
+      'updatedAt',
+      'createdAt',
+    ] as const;
+
+    const rows = products.map((product) => {
+      const adminProduct = this.toAdminProduct(product);
+
+      return {
+        id: adminProduct.id,
+        name: adminProduct.name,
+        sku: adminProduct.sku ?? '',
+        vendor: adminProduct.vendor.name,
+        store: adminProduct.store.name,
+        category: adminProduct.category?.name ?? '',
+        price: this.decimal(adminProduct.price),
+        discountPrice:
+          adminProduct.discountPrice !== null
+            ? this.decimal(adminProduct.discountPrice)
+            : '',
+        stock: adminProduct.stock,
+        stockStatus: adminProduct.stockStatus,
+        status: adminProduct.status,
+        managementStatus: adminProduct.managementStatus,
+        updatedAt: adminProduct.updatedAt.toISOString(),
+        createdAt: adminProduct.createdAt.toISOString(),
+      };
+    });
+
+    return this.toCsv(headers, rows);
   }
 
   findPublicOne(id: string) {
@@ -353,27 +468,40 @@ export class ProductsService {
     return this.updateStatus(id, ProductStatus.INACTIVE, actorId, 'PRODUCT_DEACTIVATED');
   }
 
-  private defaultInclude() {
+  async bulkAction(actorId: string, dto: AdminProductBulkActionDto) {
+    const data: ProductRecord[] = [];
+
+    for (const productId of dto.productIds) {
+      switch (dto.action) {
+        case AdminProductBulkAction.APPROVE:
+          data.push(await this.approve(productId, actorId));
+          break;
+        case AdminProductBulkAction.REJECT:
+          data.push(await this.reject(productId, actorId));
+          break;
+        case AdminProductBulkAction.ACTIVATE:
+          data.push(await this.activate(productId, actorId));
+          break;
+        case AdminProductBulkAction.DEACTIVATE:
+          data.push(await this.deactivate(productId, actorId));
+          break;
+        case AdminProductBulkAction.DELETE:
+          data.push(await this.remove(productId, actorId, UserRole.ADMIN));
+          break;
+        default:
+          throw new BadRequestException('Unsupported bulk action');
+      }
+    }
+
     return {
-      vendor: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-        },
-      },
-      store: {
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          verificationStatus: true,
-          commissionRate: true,
-          status: true,
-        },
-      },
-      category: true,
-    } as const;
+      action: dto.action,
+      count: data.length,
+      data: data.map((product) => this.toAdminProduct(product)),
+    };
+  }
+
+  private defaultInclude() {
+    return productInclude;
   }
 
   private async resolveWritableStore(
@@ -555,7 +683,7 @@ export class ProductsService {
     status: ProductStatus,
     actorId?: string,
     action?: string,
-  ) {
+  ): Promise<ProductRecord> {
     return this.prisma.$transaction(async (tx) => {
       const current = await tx.product.findUniqueOrThrow({
         where: { id },
@@ -629,5 +757,141 @@ export class ProductsService {
     await Promise.all(
       publicIds.map((publicId) => this.cloudinaryService.deleteImage(publicId)),
     );
+  }
+
+  private buildProductWhere(query: ProductQueryDto): Prisma.ProductWhereInput {
+    const search = query.search?.trim();
+    const dateRange = this.updatedAtWhere(query.startDate, query.endDate);
+    const and: Prisma.ProductWhereInput[] = [
+      {
+        status: query.status,
+        categoryId: query.categoryId,
+        vendorId: query.vendorId,
+        storeId: query.storeId,
+        updatedAt: dateRange,
+      },
+    ];
+
+    if (search) {
+      and.push({
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { sku: { contains: search, mode: 'insensitive' } },
+          { description: { contains: search, mode: 'insensitive' } },
+        ],
+      });
+    }
+
+    if (query.stockStatus) {
+      and.push(this.stockStateWhere(query.stockStatus));
+    }
+
+    return { AND: and };
+  }
+
+  private buildSummaryWhere(query: ProductQueryDto): Prisma.ProductWhereInput {
+    return {
+      categoryId: query.categoryId,
+      vendorId: query.vendorId,
+      storeId: query.storeId,
+      updatedAt: this.updatedAtWhere(query.startDate, query.endDate),
+    };
+  }
+
+  private updatedAtWhere(startDate?: string, endDate?: string) {
+    if (!startDate && !endDate) {
+      return undefined;
+    }
+
+    return {
+      gte: startDate ? new Date(startDate) : undefined,
+      lte: endDate ? this.endOfDay(endDate) : undefined,
+    };
+  }
+
+  private endOfDay(date: string) {
+    const value = new Date(date);
+    value.setHours(23, 59, 59, 999);
+    return value;
+  }
+
+  private stockStateWhere(stockStatus: ProductStockStatus): Prisma.ProductWhereInput {
+    switch (stockStatus) {
+      case ProductStockStatus.IN_STOCK:
+        return { stock: { gt: ADMIN_PRODUCT_LOW_STOCK_THRESHOLD } };
+      case ProductStockStatus.LOW_STOCK:
+        return {
+          stock: {
+            gt: 0,
+            lte: ADMIN_PRODUCT_LOW_STOCK_THRESHOLD,
+          },
+        };
+      case ProductStockStatus.OUT_OF_STOCK:
+        return {
+          OR: [{ stock: { lte: 0 } }, { status: ProductStatus.OUT_OF_STOCK }],
+        };
+      default:
+        return {};
+    }
+  }
+
+  private toAdminProduct(product: ProductRecord) {
+    const stockStatus = this.resolveStockStatus(product);
+
+    return {
+      ...product,
+      stockStatus,
+      managementStatus: this.resolveManagementStatus(product.status, stockStatus),
+      isLowStock: stockStatus === ProductStockStatus.LOW_STOCK,
+      isOutOfStock: stockStatus === ProductStockStatus.OUT_OF_STOCK,
+    };
+  }
+
+  private resolveStockStatus(product: Pick<ProductRecord, 'stock' | 'status'>) {
+    if (product.status === ProductStatus.OUT_OF_STOCK || product.stock <= 0) {
+      return ProductStockStatus.OUT_OF_STOCK;
+    }
+
+    if (product.stock <= ADMIN_PRODUCT_LOW_STOCK_THRESHOLD) {
+      return ProductStockStatus.LOW_STOCK;
+    }
+
+    return ProductStockStatus.IN_STOCK;
+  }
+
+  private resolveManagementStatus(
+    status: ProductStatus,
+    stockStatus: ProductStockStatus,
+  ) {
+    if (status !== ProductStatus.ACTIVE) {
+      return status;
+    }
+
+    if (stockStatus === ProductStockStatus.OUT_OF_STOCK) {
+      return ProductStatus.OUT_OF_STOCK;
+    }
+
+    if (stockStatus === ProductStockStatus.LOW_STOCK) {
+      return ProductStockStatus.LOW_STOCK;
+    }
+
+    return ProductStatus.ACTIVE;
+  }
+
+  private decimal(value?: Prisma.Decimal | number | string | null) {
+    return new Prisma.Decimal(value ?? 0).toDecimalPlaces(2).toNumber();
+  }
+
+  private toCsv(headers: readonly string[], rows: Record<string, unknown>[]) {
+    const escape = (value: unknown) => {
+      const content = String(value ?? '');
+      return `"${content.replace(/"/g, '""')}"`;
+    };
+    const lines = [
+      headers.join(','),
+      ...rows.map((row) => headers.map((header) => escape(row[header])).join(',')),
+    ];
+
+    return lines.join('\n');
   }
 }

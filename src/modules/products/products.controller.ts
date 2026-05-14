@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
@@ -16,6 +17,7 @@ import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { SkipResponseTransform } from '../../common/decorators/skip-response-transform.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import {
@@ -23,6 +25,10 @@ import {
   UploadedImageFile,
 } from '../../common/pipes/images-upload.pipe';
 import { AuthUser } from '../../common/types/auth-user.type';
+import { Response } from 'express';
+import {
+  AdminProductBulkActionDto,
+} from './dto/admin-product-bulk-action.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ProductQueryDto } from './dto/product-query.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -282,14 +288,160 @@ export class VendorProductsController {
 export class AdminProductsController {
   constructor(private readonly productsService: ProductsService) { }
 
+  @Get('stats/summary')
+  findSummary(@Query() query: ProductQueryDto) {
+    return this.productsService.findAdminSummary(query);
+  }
+
+  @Get('export')
+  @SkipResponseTransform()
+  async export(@Query() query: ProductQueryDto, @Res() res: Response) {
+    const csv = await this.productsService.exportAdminProducts(query);
+    const date = new Date().toISOString().slice(0, 10);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="admin-products-${date}.csv"`,
+    );
+    res.send(csv);
+  }
+
+  @Post()
+  @UseInterceptors(
+    FilesInterceptor('images', PRODUCT_IMAGE_LIMITS.maxFiles, {
+      limits: {
+        files: PRODUCT_IMAGE_LIMITS.maxFiles,
+        fileSize: PRODUCT_IMAGE_LIMITS.maxSizeInBytes,
+      },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['name', 'price', 'images', 'storeId'],
+      properties: {
+        name: { type: 'string' },
+        slug: { type: 'string' },
+        description: { type: 'string' },
+        price: { type: 'number', minimum: 0.01 },
+        discountPrice: { type: 'number', minimum: 0 },
+        stock: { type: 'integer', minimum: 0 },
+        sku: { type: 'string' },
+        status: {
+          type: 'string',
+          enum: [
+            'DRAFT',
+            'PENDING_REVIEW',
+            'ACTIVE',
+            'INACTIVE',
+            'REJECTED',
+            'OUT_OF_STOCK',
+          ],
+        },
+        storeId: { type: 'string', format: 'uuid' },
+        categoryId: { type: 'string', format: 'uuid' },
+        images: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 3,
+          items: { type: 'string', format: 'binary' },
+        },
+      },
+    },
+  })
+  create(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: CreateProductDto,
+    @UploadedFiles(
+      new ImagesUploadPipe({
+        minFiles: 1,
+        maxFiles: PRODUCT_IMAGE_LIMITS.maxFiles,
+        maxSizeInBytes: PRODUCT_IMAGE_LIMITS.maxSizeInBytes,
+        fieldName: 'images',
+      }),
+    )
+    images: UploadedImageFile[],
+  ) {
+    return this.productsService.create(user.id, user.role, dto, images);
+  }
+
   @Get()
   findAll(@Query() query: ProductQueryDto) {
     return this.productsService.findAll(query);
   }
 
+  @Patch('bulk')
+  bulkAction(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: AdminProductBulkActionDto,
+  ) {
+    return this.productsService.bulkAction(user.id, dto);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.productsService.findOne(id);
+  }
+
+  @Patch(':id')
+  @UseInterceptors(
+    FilesInterceptor('images', PRODUCT_IMAGE_LIMITS.maxFiles, {
+      limits: {
+        files: PRODUCT_IMAGE_LIMITS.maxFiles,
+        fileSize: PRODUCT_IMAGE_LIMITS.maxSizeInBytes,
+      },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        slug: { type: 'string' },
+        description: { type: 'string' },
+        price: { type: 'number', minimum: 0.01 },
+        discountPrice: { type: 'number', minimum: 0, nullable: true },
+        stock: { type: 'integer', minimum: 0 },
+        sku: { type: 'string' },
+        status: {
+          type: 'string',
+          enum: [
+            'DRAFT',
+            'PENDING_REVIEW',
+            'ACTIVE',
+            'INACTIVE',
+            'REJECTED',
+            'OUT_OF_STOCK',
+          ],
+        },
+        categoryId: { type: 'string', format: 'uuid' },
+        images: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 3,
+          items: { type: 'string', format: 'binary' },
+        },
+      },
+    },
+  })
+  update(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateProductDto,
+    @UploadedFiles(
+      new ImagesUploadPipe({
+        minFiles: 0,
+        maxFiles: PRODUCT_IMAGE_LIMITS.maxFiles,
+        maxSizeInBytes: PRODUCT_IMAGE_LIMITS.maxSizeInBytes,
+        fieldName: 'images',
+      }),
+    )
+    images: UploadedImageFile[],
+  ) {
+    return this.productsService.update(id, dto, user.id, user.role, images);
   }
 
   @Patch(':id/approve')
@@ -310,5 +462,10 @@ export class AdminProductsController {
   @Patch(':id/deactivate')
   deactivate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.productsService.deactivate(id, user.id);
+  }
+
+  @Delete(':id')
+  remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.productsService.remove(id, user.id, user.role);
   }
 }
