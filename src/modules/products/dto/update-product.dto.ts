@@ -65,6 +65,10 @@ export class UpdateProductDto {
   status?: ProductStatus;
 
   @IsOptional()
+  @IsUUID()
+  storeId?: string;
+
+  @IsOptional()
   @Transform(({ value }) => (value === '' || value === 'null' ? null : value))
   @IsUUID()
   categoryId?: string | null;

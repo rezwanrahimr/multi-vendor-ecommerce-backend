@@ -358,6 +358,19 @@ export class ProductsService {
 
     this.assertCanWriteProduct(current.vendorId, changedById, role);
     this.validatePricing(dto.price ?? Number(current.price), nextDiscountPrice);
+    if (dto.storeId !== undefined && dto.storeId !== current.storeId) {
+      const writableStore = await this.resolveWritableStore(
+        changedById,
+        role,
+        dto.storeId,
+      );
+
+      if (role !== UserRole.ADMIN && writableStore.id !== dto.storeId) {
+        throw new ForbiddenException(
+          'You can only assign products to your own store',
+        );
+      }
+    }
     await this.assertActiveCategory(dto.categoryId);
 
     const uploadedImages =
