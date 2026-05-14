@@ -12,6 +12,14 @@ import {
   Min,
 } from 'class-validator';
 
+const toOptionalNumber = ({ value }: { value: unknown }) => {
+  if (value === '' || value === 'null' || value === null || value === undefined) {
+    return undefined;
+  }
+
+  return typeof value === 'number' ? value : Number(value);
+};
+
 export class UpdateProductDto {
   @IsOptional()
   @IsString()
@@ -30,17 +38,19 @@ export class UpdateProductDto {
   description?: string;
 
   @IsOptional()
+  @Transform(toOptionalNumber)
   @IsNumber()
   @Min(0.01)
   price?: number;
 
   @IsOptional()
-  @Transform(({ value }) => (value === '' || value === 'null' ? null : value))
+  @Transform(toOptionalNumber)
   @IsNumber()
   @Min(0)
-  discountPrice?: number | null;
+  discountPrice?: number;
 
   @IsOptional()
+  @Transform(toOptionalNumber)
   @IsInt()
   @Min(0)
   stock?: number;
