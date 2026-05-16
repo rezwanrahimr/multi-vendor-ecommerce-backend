@@ -773,7 +773,7 @@ export class ProductsService {
   }
 
   private buildProductWhere(query: ProductQueryDto): Prisma.ProductWhereInput {
-    const search = query.search?.trim();
+    const search = this.normalizeSearchTerm(query.search);
     const dateRange = this.updatedAtWhere(query.startDate, query.endDate);
     const and: Prisma.ProductWhereInput[] = [
       {
@@ -791,6 +791,9 @@ export class ProductsService {
           { name: { contains: search, mode: 'insensitive' } },
           { sku: { contains: search, mode: 'insensitive' } },
           { description: { contains: search, mode: 'insensitive' } },
+          { store: { is: { name: { contains: search, mode: 'insensitive' } } } },
+          { category: { is: { name: { contains: search, mode: 'insensitive' } } } },
+          { vendor: { is: { name: { contains: search, mode: 'insensitive' } } } },
         ],
       });
     }
@@ -826,6 +829,11 @@ export class ProductsService {
     const value = new Date(date);
     value.setHours(23, 59, 59, 999);
     return value;
+  }
+
+  private normalizeSearchTerm(search?: string) {
+    const normalized = search?.trim().replace(/\s+/g, ' ');
+    return normalized ? normalized.slice(0, 120) : undefined;
   }
 
   private stockStateWhere(stockStatus: ProductStockStatus): Prisma.ProductWhereInput {

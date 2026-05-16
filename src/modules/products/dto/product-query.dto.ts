@@ -4,6 +4,7 @@ import {
   IsEnum,
   IsNumber,
   IsOptional,
+  MaxLength,
   IsString,
   IsUUID,
   Min,
@@ -18,6 +19,7 @@ export enum ProductStockStatus {
 export class ProductQueryDto {
   @IsOptional()
   @IsString()
+  @MaxLength(120)
   search?: string;
 
   @IsOptional()
