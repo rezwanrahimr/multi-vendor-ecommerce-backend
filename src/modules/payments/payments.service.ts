@@ -130,6 +130,73 @@ export class PaymentsService {
     };
   }
 
+  async getAdminSummary(query: PaymentQueryDto = {}) {
+    const baseWhere = this.buildPaymentWhere(query, { omitStatus: true });
+    const [
+      totalPayments,
+      verifiedPayments,
+      pendingPayments,
+      rejectedPayments,
+      unpaidPayments,
+      failedPayments,
+      refundedPayments,
+    ] = await this.prisma.$transaction([
+      this.prisma.payment.count({ where: baseWhere }),
+      this.prisma.payment.count({
+        where: {
+          ...baseWhere,
+          paymentStatus: PaymentStatus.PAID,
+        },
+      }),
+      this.prisma.payment.count({
+        where: {
+          ...baseWhere,
+          paymentStatus: PaymentStatus.PENDING_VERIFICATION,
+        },
+      }),
+      this.prisma.payment.count({
+        where: {
+          ...baseWhere,
+          paymentStatus: PaymentStatus.REJECTED,
+        },
+      }),
+      this.prisma.payment.count({
+        where: {
+          ...baseWhere,
+          paymentStatus: PaymentStatus.UNPAID,
+        },
+      }),
+      this.prisma.payment.count({
+        where: {
+          ...baseWhere,
+          paymentStatus: PaymentStatus.FAILED,
+        },
+      }),
+      this.prisma.payment.count({
+        where: {
+          ...baseWhere,
+          paymentStatus: PaymentStatus.REFUNDED,
+        },
+      }),
+    ]);
+
+    return {
+      totalPayments: this.buildSummaryMetric(totalPayments, totalPayments),
+      verifiedPayments: this.buildSummaryMetric(verifiedPayments, totalPayments),
+      pendingPayments: this.buildSummaryMetric(pendingPayments, totalPayments),
+      rejectedPayments: this.buildSummaryMetric(rejectedPayments, totalPayments),
+      statusBreakdown: {
+        all: totalPayments,
+        paid: verifiedPayments,
+        pendingVerification: pendingPayments,
+        rejected: rejectedPayments,
+        unpaid: unpaidPayments,
+        failed: failedPayments,
+        refunded: refundedPayments,
+      },
+    };
+  }
+
   findOne(id: string) {
     return this.prisma.payment.findUniqueOrThrow({
       where: { id },
@@ -305,18 +372,32 @@ export class PaymentsService {
     );
   }
 
-  private buildPaymentWhere(query: PaymentQueryDto): Prisma.PaymentWhereInput {
-    const dateRange = query.date ? this.getDayBounds(new Date(query.date)) : null;
+  private buildPaymentWhere(
+    query: PaymentQueryDto,
+    options: { omitStatus?: boolean } = {},
+  ): Prisma.PaymentWhereInput {
+    const search = query.search?.trim();
+    const createdAt = this.buildCreatedAtFilter(query);
 
     return {
-      paymentStatus: query.paymentStatus,
+      paymentStatus: options.omitStatus ? undefined : query.paymentStatus,
       paymentMethod: query.paymentMethod,
       orderId: query.orderId,
       customerId: query.customerId,
       transactionId: query.transactionId
         ? { contains: query.transactionId, mode: 'insensitive' }
         : undefined,
-      createdAt: dateRange ? { gte: dateRange.start, lt: dateRange.end } : undefined,
+      createdAt,
+      OR: search
+        ? [
+            { transactionId: { contains: search, mode: 'insensitive' } },
+            { senderPhone: { contains: search, mode: 'insensitive' } },
+            { order: { orderNumber: { contains: search, mode: 'insensitive' } } },
+            { customer: { name: { contains: search, mode: 'insensitive' } } },
+            { customer: { email: { contains: search, mode: 'insensitive' } } },
+            { customer: { phone: { contains: search, mode: 'insensitive' } } },
+          ]
+        : undefined,
     };
   }
 
@@ -431,6 +512,46 @@ export class PaymentsService {
     if (!new Prisma.Decimal(payment.cashCollectedAmount).eq(payment.order.total)) {
       throw new BadRequestException('COD cash collection amount does not match order total');
     }
+  }
+
+  private buildSummaryMetric(value: number, total: number) {
+    return {
+      value,
+      percentageOfTotal:
+        total > 0 ? Number(((value / total) * 100).toFixed(1)) : 0,
+    };
+  }
+
+  private buildCreatedAtFilter(query: PaymentQueryDto) {
+    if (query.dateFrom || query.dateTo) {
+      return {
+        gte: query.dateFrom ? this.startOfDay(new Date(query.dateFrom)) : undefined,
+        lte: query.dateTo ? this.endOfDay(new Date(query.dateTo)) : undefined,
+      };
+    }
+
+    if (query.date) {
+      const range = this.getDayBounds(new Date(query.date));
+
+      return {
+        gte: range.start,
+        lt: range.end,
+      };
+    }
+
+    return undefined;
+  }
+
+  private startOfDay(date: Date) {
+    const next = new Date(date);
+    next.setHours(0, 0, 0, 0);
+    return next;
+  }
+
+  private endOfDay(date: Date) {
+    const next = new Date(date);
+    next.setHours(23, 59, 59, 999);
+    return next;
   }
 
   private getDayBounds(date = new Date()) {

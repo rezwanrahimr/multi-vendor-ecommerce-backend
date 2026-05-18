@@ -55,6 +55,11 @@ export class AdminPaymentsController {
     return this.paymentsService.findAll(query);
   }
 
+  @Get('stats/summary')
+  summary(@Query() query: PaymentQueryDto) {
+    return this.paymentsService.getAdminSummary(query);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.paymentsService.findOne(id);

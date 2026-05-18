@@ -14,6 +14,7 @@ describe('PaymentsService manual payment safety', () => {
     },
     payment: {
       findFirst: jest.fn(),
+      count: jest.fn(),
     },
     $transaction: jest.fn(),
   };
@@ -90,6 +91,38 @@ describe('PaymentsService manual payment safety', () => {
         amount: 100,
       }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('builds admin summary metrics with percentages', async () => {
+    prisma.$transaction.mockResolvedValue([12, 8, 2, 1, 1, 0, 0]);
+
+    await expect(service.getAdminSummary({})).resolves.toEqual({
+      totalPayments: {
+        value: 12,
+        percentageOfTotal: 100,
+      },
+      verifiedPayments: {
+        value: 8,
+        percentageOfTotal: 66.7,
+      },
+      pendingPayments: {
+        value: 2,
+        percentageOfTotal: 16.7,
+      },
+      rejectedPayments: {
+        value: 1,
+        percentageOfTotal: 8.3,
+      },
+      statusBreakdown: {
+        all: 12,
+        paid: 8,
+        pendingVerification: 2,
+        rejected: 1,
+        unpaid: 1,
+        failed: 0,
+        refunded: 0,
+      },
+    });
   });
 
   it('keeps automatic payment webhooks disabled', () => {
