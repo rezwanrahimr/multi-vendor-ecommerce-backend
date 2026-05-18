@@ -16,6 +16,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { AuthUser } from '../../common/types/auth-user.type';
 import { PaymentsService } from '../payments/payments.service';
+import {AdminOrderQueryDto} from './dto/admin-order-query.dto';
 import { WalletsService } from '../wallets/wallets.service';
 import { AssignDeliveryManDto } from './dto/assign-delivery-man.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -92,8 +93,13 @@ export class AdminOrdersController {
   ) {}
 
   @Get()
-  findAll(@Query('page') page?: number, @Query('limit') limit?: number) {
-    return this.ordersService.findAll(page, limit);
+  findAll(@Query() query: AdminOrderQueryDto) {
+    return this.ordersService.findAll(query);
+  }
+
+  @Get('stats/summary')
+  summary(@Query() query: AdminOrderQueryDto) {
+    return this.ordersService.getAdminSummary(query);
   }
 
   @Get(':id')

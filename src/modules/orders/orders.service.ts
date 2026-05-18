@@ -30,6 +30,7 @@ import { CouponsService } from '../coupons/coupons.service';
 import { DeliveryType } from '../delivery-zones/dto/calculate-delivery-charge.dto';
 import { DeliveryZonesService } from '../delivery-zones/delivery-zones.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import {AdminOrderQueryDto} from './dto/admin-order-query.dto';
 import { AssignDeliveryManDto } from './dto/assign-delivery-man.dto';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
@@ -238,21 +239,137 @@ export class OrdersService {
     return this.findCustomerOrder(customerId, orderId);
   }
 
-  async findAll(page?: number, limit?: number) {
-    const pagination = getPagination({ page, limit });
+  async findAll(query: AdminOrderQueryDto = {}) {
+    const pagination = getPagination({ page: query.page, limit: query.limit });
+    const where = this.buildAdminWhere(query);
+
     const [data, total] = await this.prisma.$transaction([
       this.prisma.order.findMany({
+        where,
         skip: pagination.skip,
         take: pagination.take,
         orderBy: { createdAt: 'desc' },
         include: this.defaultInclude(),
       }),
-      this.prisma.order.count(),
+      this.prisma.order.count({where}),
     ]);
 
     return {
       data,
       meta: buildPaginationMeta(total, pagination.page, pagination.limit),
+    };
+  }
+
+  async getAdminSummary(query: AdminOrderQueryDto = {}) {
+    const baseWhere = this.buildAdminWhere(query, {omitStatus: true});
+    const {currentRange, previousRange} = this.resolveSummaryRanges(query);
+
+    const [
+      totalOrders,
+      pendingOrders,
+      outForDeliveryOrders,
+      deliveredOrders,
+      currentTotal,
+      previousTotal,
+      currentPending,
+      previousPending,
+      currentOutForDelivery,
+      previousOutForDelivery,
+      currentDelivered,
+      previousDelivered,
+    ] = await this.prisma.$transaction([
+      this.prisma.order.count({where: baseWhere}),
+      this.prisma.order.count({
+        where: {
+          ...baseWhere,
+          status: OrderStatus.PENDING,
+        },
+      }),
+      this.prisma.order.count({
+        where: {
+          ...baseWhere,
+          status: OrderStatus.OUT_FOR_DELIVERY,
+        },
+      }),
+      this.prisma.order.count({
+        where: {
+          ...baseWhere,
+          status: OrderStatus.DELIVERED,
+        },
+      }),
+      this.prisma.order.count({
+        where: {
+          ...baseWhere,
+          createdAt: currentRange,
+        },
+      }),
+      this.prisma.order.count({
+        where: {
+          ...baseWhere,
+          createdAt: previousRange,
+        },
+      }),
+      this.prisma.order.count({
+        where: {
+          ...baseWhere,
+          status: OrderStatus.PENDING,
+          createdAt: currentRange,
+        },
+      }),
+      this.prisma.order.count({
+        where: {
+          ...baseWhere,
+          status: OrderStatus.PENDING,
+          createdAt: previousRange,
+        },
+      }),
+      this.prisma.order.count({
+        where: {
+          ...baseWhere,
+          status: OrderStatus.OUT_FOR_DELIVERY,
+          createdAt: currentRange,
+        },
+      }),
+      this.prisma.order.count({
+        where: {
+          ...baseWhere,
+          status: OrderStatus.OUT_FOR_DELIVERY,
+          createdAt: previousRange,
+        },
+      }),
+      this.prisma.order.count({
+        where: {
+          ...baseWhere,
+          status: OrderStatus.DELIVERED,
+          createdAt: currentRange,
+        },
+      }),
+      this.prisma.order.count({
+        where: {
+          ...baseWhere,
+          status: OrderStatus.DELIVERED,
+          createdAt: previousRange,
+        },
+      }),
+    ]);
+
+    return {
+      totalOrders: {
+        value: totalOrders,
+        changePercentage: this.calculateTrend(currentTotal, previousTotal),
+      },
+      pendingOrders: {
+        value: pendingOrders,
+        changePercentage: this.calculateTrend(currentPending, previousPending),
+      },
+      outForDeliveryOrders: {
+        value: outForDeliveryOrders,
+        changePercentage: this.calculateTrend(currentOutForDelivery, previousOutForDelivery),
+      },
+      deliveredOrders: {
+        value: deliveredOrders,
+        changePercentage: this.calculateTrend(currentDelivered, previousDelivered),
+      },
     };
   }
 
@@ -611,6 +728,84 @@ export class OrdersService {
     const timestamp = Date.now().toString(36).toUpperCase();
     const random = Math.random().toString(36).slice(2, 8).toUpperCase();
     return `HF-${timestamp}-${random}`;
+  }
+
+  private buildAdminWhere(
+    query: AdminOrderQueryDto,
+    options: {omitStatus?: boolean} = {},
+  ): Prisma.OrderWhereInput {
+    const dateFilter = this.buildCreatedAtFilter(query.dateFrom, query.dateTo);
+    const search = query.search?.trim();
+
+    return {
+      status: options.omitStatus ? undefined : query.status,
+      paymentMethod: query.paymentMethod,
+      paymentStatus: query.paymentStatus,
+      deliveryStatus: query.deliveryStatus,
+      deliveryManId: query.deliveryManId,
+      createdAt: dateFilter,
+      OR: search
+        ? [
+            {orderNumber: {contains: search, mode: 'insensitive'}},
+            {customer: {name: {contains: search, mode: 'insensitive'}}},
+            {customer: {email: {contains: search, mode: 'insensitive'}}},
+            {customer: {phone: {contains: search, mode: 'insensitive'}}},
+          ]
+        : undefined,
+    };
+  }
+
+  private buildCreatedAtFilter(dateFrom?: string, dateTo?: string) {
+    if (!dateFrom && !dateTo) {
+      return undefined;
+    }
+
+    return {
+      gte: dateFrom ? this.startOfDay(new Date(dateFrom)) : undefined,
+      lte: dateTo ? this.endOfDay(new Date(dateTo)) : undefined,
+    };
+  }
+
+  private resolveSummaryRanges(query: AdminOrderQueryDto) {
+    const now = new Date();
+    const currentEnd = query.dateTo ? this.endOfDay(new Date(query.dateTo)) : now;
+    const currentStart = query.dateFrom
+      ? this.startOfDay(new Date(query.dateFrom))
+      : this.startOfDay(new Date(currentEnd.getTime() - 6 * 24 * 60 * 60 * 1000));
+    const spanMs = currentEnd.getTime() - currentStart.getTime();
+    const previousEnd = new Date(currentStart.getTime() - 1);
+    const previousStart = new Date(previousEnd.getTime() - spanMs);
+
+    return {
+      currentRange: {
+        gte: currentStart,
+        lte: currentEnd,
+      },
+      previousRange: {
+        gte: previousStart,
+        lte: previousEnd,
+      },
+    };
+  }
+
+  private calculateTrend(current: number, previous: number) {
+    if (previous === 0) {
+      return current > 0 ? 100 : 0;
+    }
+
+    return Number((((current - previous) / previous) * 100).toFixed(1));
+  }
+
+  private startOfDay(date: Date) {
+    const next = new Date(date);
+    next.setHours(0, 0, 0, 0);
+    return next;
+  }
+
+  private endOfDay(date: Date) {
+    const next = new Date(date);
+    next.setHours(23, 59, 59, 999);
+    return next;
   }
 
   private defaultInclude() {
